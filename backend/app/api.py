@@ -17,6 +17,10 @@ from .schemas import (
     ConjunctionResponse,
     CongestionBand,
     CongestionResponse,
+    OptimizeManeuverRequest,
+    OptimizeManeuverResponse,
+    TradeStudyEntry,
+    TradeStudyResponse,
 )
 from .services.avoidance_simulator import AvoidanceSimulator
 from .services.congestion_analyser import CongestionAnalyser
@@ -69,13 +73,61 @@ def avoidance_sim(event_id: int, payload: AvoidanceRequest, db: Session = Depend
         raise HTTPException(status_code=404, detail="Conjunction event not found")
 
     simulator = AvoidanceSimulator(db)
-    updated_miss_distance, _ = simulator.simulate(event, payload.delta_v_mps)
+    updated_miss_distance, _ = simulator.simulate(event, payload.delta_v_mps, payload.direction)
     return AvoidanceResponse(
         event_id=event.id,
         original_miss_distance_km=event.miss_distance_km,
         updated_miss_distance_km=updated_miss_distance,
         delta_km=updated_miss_distance - event.miss_distance_km,
-        note="Simplified non-authoritative simulation using along-track offset.",
+        note="High-fidelity RTN maneuver simulation with Pc computation.",
+        post_pc=event.post_maneuver_pc,
+        fuel_cost_kg=event.post_maneuver_fuel_cost_kg,
+        direction=payload.direction,
+    )
+
+
+@router.post("/events/{event_id}/optimize-maneuver", response_model=OptimizeManeuverResponse)
+def optimize_maneuver_endpoint(
+    event_id: int,
+    payload: OptimizeManeuverRequest,
+    db: Session = Depends(get_session),
+):
+    """Find minimum delta-v burn to achieve target Pc threshold."""
+    event = db.execute(select(ConjunctionEvent).where(ConjunctionEvent.id == event_id)).scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Conjunction event not found")
+
+    simulator = AvoidanceSimulator(db)
+    try:
+        result = simulator.run_optimize(
+            event,
+            target_pc=payload.target_pc,
+            direction=payload.direction,
+            max_dv_mps=payload.max_dv_mps,
+            burn_lead_time_hours=payload.burn_lead_time_hours,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return OptimizeManeuverResponse(**result)
+
+
+@router.get("/events/{event_id}/trade-study", response_model=TradeStudyResponse)
+def trade_study_endpoint(event_id: int, db: Session = Depends(get_session)):
+    """Return maneuver trade table across all 6 RTN directions."""
+    event = db.execute(select(ConjunctionEvent).where(ConjunctionEvent.id == event_id)).scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Conjunction event not found")
+
+    simulator = AvoidanceSimulator(db)
+    try:
+        entries = simulator.run_trade_study(event)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return TradeStudyResponse(
+        event_id=event.id,
+        entries=[TradeStudyEntry(**e) for e in entries],
     )
 
 
