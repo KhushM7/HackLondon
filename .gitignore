@@ -9,3 +9,6 @@ node_modules/
 .env
 .env.local
 .pytest_cache/
+
+orbitguard.db-shm
+orbitguard.db-wal
