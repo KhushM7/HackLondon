@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { addSatellite, CatalogItem } from '../lib/api';
+import { useMemo, useState } from 'react';
+import { addCustomSatellite, addSatellite, CatalogItem } from '../lib/api';
+
+type Mode = 'norad' | 'custom';
 
 export function AddSatelliteModal({
   onClose,
@@ -10,28 +12,55 @@ export function AddSatelliteModal({
   onClose: () => void;
   onAdded: (sat: CatalogItem) => void;
 }) {
+  const [mode, setMode] = useState<Mode>('norad');
+
   const [noradId, setNoradId] = useState('');
+  const [name, setName] = useState('');
+  const [line1, setLine1] = useState('');
+  const [line2, setLine2] = useState('');
+
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
 
+  const submitLabel = useMemo(() => {
+    if (status === 'loading') return mode === 'norad' ? 'Fetching TLE...' : 'Saving...';
+    if (status === 'success') return 'Done';
+    return mode === 'norad' ? 'Add from NORAD' : 'Add Custom Satellite';
+  }, [status, mode]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const id = Number(noradId);
-    if (!id || id < 1) {
-      setStatus('error');
-      setMessage('Enter a valid positive NORAD catalog number.');
-      return;
-    }
     setStatus('loading');
     setMessage('');
+
     try {
-      const sat = await addSatellite(id);
+      let sat: CatalogItem;
+      if (mode === 'norad') {
+        const id = Number(noradId);
+        if (!id || id < 1) {
+          throw new Error('Enter a valid positive NORAD catalog number.');
+        }
+        sat = await addSatellite(id);
+      } else {
+        if (!name.trim()) {
+          throw new Error('Enter a satellite name.');
+        }
+        if (!line1.trim().startsWith('1 ') || !line2.trim().startsWith('2 ')) {
+          throw new Error("TLE format invalid: line 1 must start with '1 ' and line 2 with '2 '.");
+        }
+        sat = await addCustomSatellite({
+          name: name.trim(),
+          line1: line1.trim(),
+          line2: line2.trim(),
+        });
+      }
+
       setStatus('success');
       setMessage(`Added: ${sat.name} (NORAD ${sat.norad_id})`);
       setTimeout(() => {
         onAdded(sat);
         onClose();
-      }, 1200);
+      }, 900);
     } catch (err: unknown) {
       setStatus('error');
       setMessage(err instanceof Error ? err.message : 'Failed to add satellite');
@@ -53,31 +82,95 @@ export function AddSatelliteModal({
     >
       <div
         className="panel"
-        style={{ width: 400, padding: '1.5rem' }}
+        style={{ width: 520, padding: '1.2rem' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 style={{ margin: '0 0 1rem' }}>Add Satellite by NORAD ID</h3>
+        <h3 style={{ margin: '0 0 0.8rem' }}>Add Satellite</h3>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: 4, fontSize: '0.9rem' }}>
-              NORAD Catalog Number
-            </label>
-            <input
-              type="number"
-              placeholder="e.g. 25544 (ISS)"
-              value={noradId}
-              onChange={(e) => setNoradId(e.target.value)}
-              style={{ width: '100%' }}
-              min={1}
-              disabled={status === 'loading' || status === 'success'}
-              autoFocus
-            />
-          </div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button
+            type="button"
+            style={mode === 'norad' ? { background: 'var(--accent)', color: '#08131f', border: 'none' } : {}}
+            onClick={() => {
+              setMode('norad');
+              setStatus('idle');
+              setMessage('');
+            }}
+          >
+            NORAD
+          </button>
+          <button
+            type="button"
+            style={mode === 'custom' ? { background: 'var(--accent)', color: '#08131f', border: 'none' } : {}}
+            onClick={() => {
+              setMode('custom');
+              setStatus('idle');
+              setMessage('');
+            }}
+          >
+            Custom TLE
+          </button>
+        </div>
 
-          <p className="disclaimer" style={{ margin: 0 }}>
-            TLE data is fetched from CelesTrak and stored locally. Only LEO satellites (altitude &lt; 2000 km) are supported.
-          </p>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {mode === 'norad' ? (
+            <>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span style={{ fontSize: '0.9rem' }}>NORAD Catalog Number</span>
+                <input
+                  type="number"
+                  placeholder="e.g. 25544"
+                  value={noradId}
+                  onChange={(e) => setNoradId(e.target.value)}
+                  min={1}
+                  disabled={status === 'loading' || status === 'success'}
+                  autoFocus
+                />
+              </label>
+              <p className="disclaimer" style={{ margin: 0 }}>
+                Fetches TLE from CelesTrak and stores locally.
+              </p>
+            </>
+          ) : (
+            <>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span style={{ fontSize: '0.9rem' }}>Satellite Name</span>
+                <input
+                  type="text"
+                  placeholder="TestSat-A"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={status === 'loading' || status === 'success'}
+                  autoFocus
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span style={{ fontSize: '0.9rem' }}>TLE Line 1</span>
+                <textarea
+                  placeholder="1 90001U 24001A   26052.50000000  .00010000  00000-0  15000-3 0  9991"
+                  value={line1}
+                  onChange={(e) => setLine1(e.target.value)}
+                  rows={2}
+                  disabled={status === 'loading' || status === 'success'}
+                  style={{ width: '100%', background: 'var(--bg-soft)', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0.5rem' }}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span style={{ fontSize: '0.9rem' }}>TLE Line 2</span>
+                <textarea
+                  placeholder="2 90001  51.6400 210.5000 0005000  75.0000 285.0000 15.50000000 12345"
+                  value={line2}
+                  onChange={(e) => setLine2(e.target.value)}
+                  rows={2}
+                  disabled={status === 'loading' || status === 'success'}
+                  style={{ width: '100%', background: 'var(--bg-soft)', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0.5rem' }}
+                />
+              </label>
+              <p className="disclaimer" style={{ margin: 0 }}>
+                Use this to add synthetic satellites for local collision-testing without API lookup.
+              </p>
+            </>
+          )}
 
           {message && (
             <p
@@ -91,13 +184,11 @@ export function AddSatelliteModal({
             </p>
           )}
 
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
             <button type="submit" disabled={status === 'loading' || status === 'success'}>
-              {status === 'loading' ? 'Fetching TLE…' : status === 'success' ? 'Done ✓' : 'Add Satellite'}
+              {submitLabel}
             </button>
-            <button type="button" onClick={onClose}>
-              Cancel
-            </button>
+            <button type="button" onClick={onClose}>Cancel</button>
           </div>
         </form>
       </div>

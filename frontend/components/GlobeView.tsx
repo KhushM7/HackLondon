@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -46,25 +46,25 @@ function Controls() {
 }
 
 function Earth() {
-  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null!);
 
   useEffect(() => {
+    let active = true;
     const loader = new THREE.TextureLoader();
     loader.load('/earth.jpg', (tex) => {
+      if (!active || !matRef.current) return;
       tex.colorSpace = THREE.SRGBColorSpace;
-      setTexture(tex);
+      matRef.current.map = tex;
+      matRef.current.color.set(0xffffff);
+      matRef.current.needsUpdate = true;
     });
+    return () => { active = false; };
   }, []);
 
   return (
     <mesh>
       <sphereGeometry args={[1, 64, 64]} />
-      <meshStandardMaterial
-        map={texture ?? undefined}
-        color={texture ? '#ffffff' : '#1a3d6e'}
-        roughness={0.7}
-        metalness={0.05}
-      />
+      <meshStandardMaterial ref={matRef} color="#1a3d6e" roughness={0.7} metalness={0.05} />
     </mesh>
   );
 }
@@ -192,36 +192,22 @@ function Scene({
   );
 }
 
-export function GlobeView({
-  satellites,
-  selectedId,
-  onSelect,
-  showAtRiskOnly,
-}: {
+export function GlobeView({ satellites, selectedId, onSelect, showAtRiskOnly }: {
   satellites: SatellitePosition[];
   selectedId: number | null;
   onSelect: (id: number | null) => void;
   showAtRiskOnly: boolean;
 }) {
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ height: 520 }}>
-        <Canvas camera={{ position: [0, 1.5, 3.8], fov: 45 }} gl={{ antialias: true }}>
-          <Scene
-            satellites={satellites}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            showAtRiskOnly={showAtRiskOnly}
-          />
-        </Canvas>
-      </div>
-      <div style={{ display: 'flex', gap: 16, padding: '0.6rem 1rem', fontSize: '0.8rem', color: 'var(--ink-muted)', flexWrap: 'wrap' }}>
-        <span><span style={{ color: '#ff6b6b' }}>●</span> High risk</span>
-        <span><span style={{ color: '#ffd56b' }}>●</span> Medium risk</span>
-        <span><span style={{ color: '#76e68e' }}>●</span> Low risk</span>
-        <span><span style={{ color: '#3a6a9a' }}>●</span> No conjunction</span>
-        <span style={{ marginLeft: 'auto' }}>Drag to rotate · Scroll to zoom · Click satellite to select</span>
-      </div>
+    <div style={{ position: 'absolute', inset: 0 }}>
+      <Canvas camera={{ position: [0, 1.5, 3.8], fov: 45 }} gl={{ antialias: true }}>
+        <Scene
+          satellites={satellites}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          showAtRiskOnly={showAtRiskOnly}
+        />
+      </Canvas>
     </div>
   );
 }

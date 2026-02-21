@@ -120,3 +120,15 @@ export async function addSatellite(noradId: number): Promise<CatalogItem> {
     body: JSON.stringify({ norad_id: noradId }),
   });
 }
+
+export async function addCustomSatellite(payload: {
+  name: string;
+  line1: string;
+  line2: string;
+}): Promise<CatalogItem> {
+  return requestJson<CatalogItem>('/catalog/custom-satellite', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}

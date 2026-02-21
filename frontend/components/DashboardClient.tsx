@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import {
   CatalogItem,
@@ -16,6 +16,110 @@ import { AddSatelliteModal } from './AddSatelliteModal';
 import { CongestionChart } from './CongestionChart';
 import { GlobeView } from './GlobeView';
 
+// ── Draggable floating window ─────────────────────────────────────────────────
+
+interface DraggableWindowProps {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  width: number;
+  initialX: number;
+  initialY: number;
+}
+
+function DraggableWindow({ title, children, onClose, width, initialX, initialY }: DraggableWindowProps) {
+  const winRef = useRef<HTMLDivElement>(null);
+  const s = useRef({ x: initialX, y: initialY, drag: false, ox: 0, oy: 0 });
+
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!s.current.drag) return;
+      s.current.x = e.clientX - s.current.ox;
+      s.current.y = e.clientY - s.current.oy;
+      if (winRef.current) {
+        winRef.current.style.left = s.current.x + 'px';
+        winRef.current.style.top = s.current.y + 'px';
+      }
+    }
+    function onUp() {
+      s.current.drag = false;
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  function onMouseDown(e: React.MouseEvent) {
+    s.current.drag = true;
+    s.current.ox = e.clientX - s.current.x;
+    s.current.oy = e.clientY - s.current.y;
+    e.preventDefault();
+  }
+
+  return (
+    <div
+      ref={winRef}
+      style={{
+        position: 'fixed',
+        left: initialX,
+        top: initialY,
+        width,
+        zIndex: 60,
+        background: 'rgba(4,10,22,0.92)',
+        border: '1px solid var(--border)',
+        borderRadius: 10,
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+      }}
+    >
+      {/* Title bar / drag handle */}
+      <div
+        onMouseDown={onMouseDown}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 14px',
+          borderBottom: '1px solid var(--border)',
+          cursor: 'grab',
+          userSelect: 'none',
+        }}
+      >
+        <span style={{ color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          {title}
+        </span>
+        <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={onClose}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--ink-muted)',
+            cursor: 'pointer',
+            fontSize: '1.1rem',
+            lineHeight: 1,
+            padding: 0,
+            boxShadow: 'none',
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Content */}
+      <div style={{ padding: '1rem', maxHeight: '70vh', overflowY: 'auto' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+
 export function DashboardClient() {
   const [satellites, setSatellites] = useState<SatellitePosition[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -25,6 +129,9 @@ export function DashboardClient() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showConjFloat, setShowConjFloat] = useState(false);
+  const [showCongFloat, setShowCongFloat] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -48,6 +155,7 @@ export function DashboardClient() {
   useEffect(() => {
     if (selectedId !== null) {
       getConjunctions(selectedId).then(setEvents).catch(() => setEvents([]));
+      setShowConjFloat(true);
     } else {
       setEvents([]);
     }
@@ -66,11 +174,9 @@ export function DashboardClient() {
   }
 
   async function handleSatelliteAdded(sat: CatalogItem) {
-    // Reload positions so the new satellite appears on the globe
     try {
       const positions = await getCatalogPositions();
       setSatellites(positions);
-      // Auto-select the newly added satellite
       setSelectedId(sat.norad_id);
     } catch {
       // positions reload failed; globe will show on next full refresh
@@ -81,84 +187,381 @@ export function DashboardClient() {
   const atRiskCount = satellites.filter((s) => s.risk_tier === 'High' || s.risk_tier === 'Medium').length;
 
   return (
-    <div className="grid" style={{ gap: '1rem' }}>
-      {showAddModal && (
-        <AddSatelliteModal
-          onClose={() => setShowAddModal(false)}
-          onAdded={handleSatelliteAdded}
-        />
-      )}
-      <header className="panel">
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <div>
-            <h1 style={{ margin: 0 }}>OrbitGuard</h1>
-            <p style={{ margin: '4px 0 0' }}>LEO conjunction screening and 3D globe visualisation.</p>
-            <p className="disclaimer" style={{ marginTop: 4 }}>
-              Public TLE only · Screening-grade · No formal probability of collision.
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setShowAddModal(true)}>+ Add Satellite</button>
-            <button onClick={triggerRefresh}>Refresh TLEs</button>
-          </div>
-        </div>
-        {error ? <p style={{ color: '#ffb36d', margin: '8px 0 0' }}>{error}</p> : null}
-      </header>
+    <div style={{ position: 'fixed', inset: 0, background: '#000', overflow: 'hidden' }}>
 
-      {/* Filter bar */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          style={!showAtRiskOnly ? { background: 'var(--accent)', color: '#08131f', border: 'none' } : {}}
-          onClick={() => setShowAtRiskOnly(false)}
-        >
-          All satellites ({loading ? '…' : satellites.length})
-        </button>
-        <button
-          style={showAtRiskOnly ? { background: '#ff6b6b', color: '#08131f', border: 'none' } : {}}
-          onClick={() => setShowAtRiskOnly(true)}
-        >
-          At-risk only ({atRiskCount})
-        </button>
-
-        {selectedSat ? (
-          <span style={{ marginLeft: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{selectedSat.name}</span>
-            <span className="disclaimer">(NORAD {selectedSat.norad_id})</span>
-            {selectedSat.risk_tier ? (
-              <span className={`badge ${selectedSat.risk_tier.toLowerCase()}`}>{selectedSat.risk_tier}</span>
-            ) : null}
-            <button style={{ padding: '0.2rem 0.5rem' }} onClick={() => setSelectedId(null)}>×</button>
-          </span>
-        ) : (
-          <span className="disclaimer" style={{ marginLeft: 8 }}>
-            Click a satellite on the globe to select it
-          </span>
-        )}
-      </div>
-
-      {/* Main grid: globe + side panel */}
-      <section className="grid grid-2" style={{ alignItems: 'start' }}>
+      {/* ── Layer 1: Globe fills entire viewport ─────────────── */}
+      <div style={{ position: 'absolute', inset: 0 }}>
         <GlobeView
           satellites={satellites}
           selectedId={selectedId}
           onSelect={setSelectedId}
           showAtRiskOnly={showAtRiskOnly}
         />
+      </div>
 
-        <div className="grid" style={{ gap: '1rem' }}>
+      {/* ── Layer 2: Gradient vignettes (non-interactive) ─────── */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 90,
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 100%)',
+          pointerEvents: 'none',
+          zIndex: 5,
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 100,
+          background: 'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%)',
+          pointerEvents: 'none',
+          zIndex: 5,
+        }}
+      />
+
+      {/* ── Layer 3: Top HUD bar ──────────────────────────────── */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '14px 20px',
+        }}
+      >
+        {/* Logo block */}
+        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+          <span
+            style={{
+              color: 'var(--accent)',
+              fontWeight: 700,
+              fontSize: '1rem',
+              letterSpacing: '0.2em',
+              textTransform: 'uppercase',
+            }}
+          >
+            ORBITGUARD
+          </span>
+          <span style={{ color: 'var(--ink-muted)', fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            · &nbsp;LEO SCREENING
+          </span>
+        </div>
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Stats chips */}
+        <div
+          style={{
+            padding: '4px 10px',
+            borderRadius: 20,
+            fontSize: '0.7rem',
+            letterSpacing: '0.06em',
+            background: 'rgba(0,0,0,0.4)',
+            border: '1px solid var(--border)',
+            color: 'var(--ink)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
+          <span style={{ color: 'var(--accent)' }}>●</span>
+          {loading ? '…' : satellites.length} TRACKED
+        </div>
+        <div
+          style={{
+            padding: '4px 10px',
+            borderRadius: 20,
+            fontSize: '0.7rem',
+            letterSpacing: '0.06em',
+            background: 'rgba(0,0,0,0.4)',
+            border: '1px solid var(--border)',
+            color: atRiskCount > 0 ? 'var(--high)' : 'var(--ink-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
+          <span>⚠</span>
+          {loading ? '…' : atRiskCount} AT RISK
+        </div>
+
+        {/* Filter group */}
+        <button
+          className={!showAtRiskOnly ? 'btn-active' : undefined}
+          onClick={() => setShowAtRiskOnly(false)}
+        >
+          ALL ({loading ? '…' : satellites.length})
+        </button>
+        <button
+          className={showAtRiskOnly ? 'btn-active' : undefined}
+          onClick={() => setShowAtRiskOnly(true)}
+        >
+          AT RISK ({loading ? '…' : atRiskCount})
+        </button>
+
+        {/* Add satellite CTA */}
+        <button className="btn-accent" onClick={() => setShowAddModal(true)}>
+          + SATELLITE
+        </button>
+
+        {/* Refresh */}
+        <button onClick={triggerRefresh}>
+          ↺ REFRESH
+        </button>
+
+        {/* Menu button + dropdown */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowMenu((v) => !v)}
+            style={{ fontSize: '1rem', padding: '0.4rem 0.65rem' }}
+          >
+            ≡
+          </button>
+
+          {/* Transparent backdrop — closes menu on outside-click */}
+          {showMenu && (
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 48 }}
+              onClick={() => setShowMenu(false)}
+            />
+          )}
+
+          {/* Dropdown card */}
+          {showMenu && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                right: 0,
+                zIndex: 50,
+                background: 'rgba(4,10,22,0.97)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                minWidth: 190,
+                padding: '6px 0',
+              }}
+            >
+              {/* Conjunctions item */}
+              <button
+                onClick={() => {
+                  if (!showConjFloat) setShowConjFloat(true);
+                  setShowMenu(false);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  width: '100%',
+                  padding: '9px 14px',
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: 0,
+                  boxShadow: 'none',
+                  textAlign: 'left',
+                  fontSize: '0.8rem',
+                  letterSpacing: '0.05em',
+                  cursor: showConjFloat ? 'default' : 'pointer',
+                  color: showConjFloat ? 'var(--ink-muted)' : 'var(--ink)',
+                  opacity: showConjFloat ? 0.45 : 1,
+                }}
+              >
+                <span>Conjunctions</span>
+                {showConjFloat && (
+                  <span style={{ fontSize: '0.62rem', letterSpacing: '0.1em', color: 'var(--accent)' }}>
+                    OPEN
+                  </span>
+                )}
+              </button>
+
+              {/* Congestion Chart item */}
+              <button
+                onClick={() => {
+                  if (!showCongFloat) setShowCongFloat(true);
+                  setShowMenu(false);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  width: '100%',
+                  padding: '9px 14px',
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: 0,
+                  boxShadow: 'none',
+                  textAlign: 'left',
+                  fontSize: '0.8rem',
+                  letterSpacing: '0.05em',
+                  cursor: showCongFloat ? 'default' : 'pointer',
+                  color: showCongFloat ? 'var(--ink-muted)' : 'var(--ink)',
+                  opacity: showCongFloat ? 0.45 : 1,
+                }}
+              >
+                <span>Congestion Chart</span>
+                {showCongFloat && (
+                  <span style={{ fontSize: '0.62rem', letterSpacing: '0.1em', color: 'var(--accent)' }}>
+                    OPEN
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Layer 4: Bottom-left selected satellite card ───────── */}
+      {selectedSat !== null && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 24,
+            left: 20,
+            zIndex: 15,
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border)',
+            borderRadius: 10,
+            padding: '12px 14px',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            minWidth: 200,
+            maxWidth: 260,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ color: 'var(--accent)', fontWeight: 600, fontSize: '0.9rem' }}>
+              {selectedSat.name}
+            </span>
+            <button
+              onClick={() => setSelectedId(null)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--ink-muted)',
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: '1rem',
+                lineHeight: 1,
+                boxShadow: 'none',
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div className="hud-label" style={{ marginBottom: 6 }}>
+            NORAD {selectedSat.norad_id}
+          </div>
+          {selectedSat.risk_tier ? (
+            <span className={`badge ${selectedSat.risk_tier.toLowerCase()}`}>
+              {selectedSat.risk_tier}
+            </span>
+          ) : null}
+        </div>
+      )}
+
+      {/* ── Layer 5: Bottom-right legend ──────────────────────── */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 24,
+          right: 20,
+          zIndex: 15,
+          display: 'flex',
+          gap: 12,
+          fontSize: '0.68rem',
+          letterSpacing: '0.07em',
+          color: 'var(--ink-muted)',
+          alignItems: 'center',
+          background: 'rgba(0,0,0,0.4)',
+          padding: '6px 12px',
+          borderRadius: 20,
+          border: '1px solid var(--border)',
+        }}
+      >
+        <span><span style={{ color: '#ff4454' }}>●</span> HIGH</span>
+        <span><span style={{ color: '#ffd32a' }}>●</span> MED</span>
+        <span><span style={{ color: '#2ed573' }}>●</span> LOW</span>
+        <span><span style={{ color: '#1a4060' }}>●</span> CLEAR</span>
+        <span style={{ color: 'var(--border-bright)' }}>|</span>
+        <span>DRAG · ZOOM · CLICK</span>
+      </div>
+
+      {/* ── Layer 6: Error toast ──────────────────────────────── */}
+      {error && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 68,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(255,60,60,0.1)',
+            border: '1px solid rgba(255,60,60,0.35)',
+            color: '#ff8080',
+            padding: '8px 16px',
+            borderRadius: 8,
+            fontSize: '0.8rem',
+            zIndex: 25,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* ── Layer 7: Add satellite modal ──────────────────────── */}
+      {showAddModal && (
+        <AddSatelliteModal
+          onClose={() => setShowAddModal(false)}
+          onAdded={handleSatelliteAdded}
+        />
+      )}
+
+      {/* ── Floating: Conjunctions ────────────────────────────── */}
+      {showConjFloat && (
+        <DraggableWindow
+          title="Conjunctions"
+          onClose={() => setShowConjFloat(false)}
+          width={440}
+          initialX={80}
+          initialY={80}
+        >
           {selectedSat ? (
-            <div className="panel">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <h3 style={{ margin: 0 }}>{selectedSat.name}</h3>
-                <Link href={`/assets/${selectedSat.norad_id}`}>Asset View →</Link>
+            <div>
+              {/* Satellite mini-header */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ color: 'var(--accent)', fontWeight: 600, fontSize: '0.9rem' }}>
+                    {selectedSat.name}
+                  </span>
+                  {selectedSat.risk_tier ? (
+                    <span className={`badge ${selectedSat.risk_tier.toLowerCase()}`}>
+                      {selectedSat.risk_tier}
+                    </span>
+                  ) : null}
+                </div>
+                <span className="hud-label">NORAD {selectedSat.norad_id}</span>
               </div>
-              <p className="disclaimer" style={{ margin: '0 0 10px' }}>NORAD {selectedSat.norad_id}</p>
+
+              {/* Conjunctions table */}
               <table>
                 <thead>
                   <tr>
                     <th>Event</th>
                     <th>TCA (UTC)</th>
-                    <th>Miss (km)</th>
+                    <th>Miss km</th>
                     <th>Risk</th>
                   </tr>
                 </thead>
@@ -168,7 +571,9 @@ export function DashboardClient() {
                       <td><Link href={`/conjunctions/${ev.id}`}>#{ev.id}</Link></td>
                       <td>{new Date(ev.tca_utc).toISOString().slice(0, 16).replace('T', ' ')}</td>
                       <td>{ev.miss_distance_km.toFixed(2)}</td>
-                      <td><span className={`badge ${ev.risk_tier.toLowerCase()}`}>{ev.risk_tier}</span></td>
+                      <td>
+                        <span className={`badge ${ev.risk_tier.toLowerCase()}`}>{ev.risk_tier}</span>
+                      </td>
                     </tr>
                   ))}
                   {events.length === 0 && (
@@ -180,12 +585,34 @@ export function DashboardClient() {
                   )}
                 </tbody>
               </table>
-            </div>
-          ) : null}
 
+              {/* Link to full asset view */}
+              <div style={{ marginTop: 14 }}>
+                <Link href={`/assets/${selectedSat.norad_id}`}>
+                  Full Asset View →
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="hud-label" style={{ textAlign: 'center', marginTop: 40, marginBottom: 40 }}>
+              SELECT A SATELLITE ON THE GLOBE
+            </div>
+          )}
+        </DraggableWindow>
+      )}
+
+      {/* ── Floating: Congestion Chart ────────────────────────── */}
+      {showCongFloat && (
+        <DraggableWindow
+          title="Altitude Congestion Index"
+          onClose={() => setShowCongFloat(false)}
+          width={700}
+          initialX={120}
+          initialY={100}
+        >
           <CongestionChart bands={bands} />
-        </div>
-      </section>
+        </DraggableWindow>
+      )}
     </div>
   );
 }
