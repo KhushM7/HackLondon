@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="Unversioned Files delete">
+      <change afterPath="$PROJECT_DIR$/.idea/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/HackLondon.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/copilot.data.migration.ask2agent.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_21_02_2026_23_27_[Changes]/orbitguard.db-shm" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_21_02_2026_23_27_[Changes]/shelved.patch" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_21_02_2026_23_27__Changes_.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/app/services/bplane_analysis.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/app/services/covariance_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/app/services/cowell_propagator.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/app/services/maneuver_planner.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/app/services/orbital_constants.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/app/services/pc_calculator.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/app/services/tca_finder.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/tests/test_orbital_mechanics.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/backend/verify_dependencies.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/PHYSICS.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/VALIDATION.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/schemas.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/schemas.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/services/avoidance_simulator.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/avoidance_simulator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/services/screening_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/screening_engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/orbitguard.db-shm" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/orbitguard.db-wal" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_21_02_2026_23_27_[Changes]/orbitguard.db-wal" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/backend/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/tests/test_avoidance_simulator.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/tests/test_avoidance_simulator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/package-lock.json" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="CopilotPersistence">
+    <persistenceIdMap>
+      <entry key="_C:/Users/khush/OneDrive/Coding/Python/Python Projects/HackLondon" value="39xWTnFbOzKT6sI2F4bhycLjPW2" />
+    </persistenceIdMap>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;KhushM7&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/KhushM7/HackLondon.git&quot;,
+    &quot;accountId&quot;: &quot;1d00d905-9a9f-4cfd-84e4-99de63cd9b47&quot;
+  }
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 3
+}</component>
+  <component name="ProjectId" id="39xWTnFbOzKT6sI2F4bhycLjPW2" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "ai.playground.ignore.import.keys.banner.in.settings": "true",
+    "git-widget-placeholder": "main",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "configurable.group.python.group.settings",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.30387.173" />
+        <option value="bundled-python-sdk-4762d8aabb82-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.30387.173" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="" />
+      <created>1771638211708</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1771638211708</updated>
+      <workItem from="1771638212805" duration="389000" />
+      <workItem from="1771697928600" duration="6896000" />
+      <workItem from="1771714032519" duration="2176000" />
+      <workItem from="1771716335587" duration="1261000" />
+    </task>
+    <task id="LOCAL-00001" summary="Added complex route collision to the backend">
+      <option name="closed" value="true" />
+      <created>1771715964689</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1771715964689</updated>
+    </task>
+    <task id="LOCAL-00002" summary="Unversioned Files">
+      <option name="closed" value="true" />
+      <created>1771716470719</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1771716470719</updated>
+    </task>
+    <task id="LOCAL-00003" summary="Unversioned Files delete">
+      <option name="closed" value="true" />
+      <created>1771716613724</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1771716613724</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Added complex route collision to the backend" />
+    <MESSAGE value="Unversioned Files" />
+    <MESSAGE value="Unversioned Files delete" />
+    <option name="LAST_COMMIT_MESSAGE" value="Unversioned Files delete" />
+  </component>
+  <component name="github-copilot-workspace">
+    <instructionFileLocations>
+      <option value=".github/instructions" />
+    </instructionFileLocations>
+    <promptFileLocations>
+      <option value=".github/prompts" />
+    </promptFileLocations>
+  </component>
+</project>

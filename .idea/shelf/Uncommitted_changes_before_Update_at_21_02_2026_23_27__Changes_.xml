@@ -1,0 +1,14 @@
+<changelist name="Uncommitted_changes_before_Update_at_21_02_2026_23_27_[Changes]" date="1771716433310" recycled="false" toDelete="true">
+  <option name="PATH" value="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_21_02_2026_23_27_[Changes]/shelved.patch" />
+  <option name="DESCRIPTION" value="Uncommitted changes before Update at 21/02/2026 23:27 [Changes]" />
+  <binary>
+    <option name="BEFORE_PATH" value="backend/orbitguard.db-shm" />
+    <option name="AFTER_PATH" value="backend/orbitguard.db-shm" />
+    <option name="SHELVED_PATH" value="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_21_02_2026_23_27_[Changes]/orbitguard.db-shm" />
+  </binary>
+  <binary>
+    <option name="BEFORE_PATH" value="backend/orbitguard.db-wal" />
+    <option name="AFTER_PATH" value="backend/orbitguard.db-wal" />
+    <option name="SHELVED_PATH" value="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_21_02_2026_23_27_[Changes]/orbitguard.db-wal" />
+  </binary>
+</changelist>
