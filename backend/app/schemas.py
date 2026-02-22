@@ -11,10 +11,19 @@ class CatalogItem(BaseModel):
     updated_at: datetime
 
 
+class ConjunctionLink(BaseModel):
+    event_id: int
+    defended_norad_id: int
+    intruder_norad_id: int
+    risk_tier: str
+
+
 class ConjunctionResponse(BaseModel):
     id: int
     defended_norad_id: int
+    defended_name: str | None = None
     intruder_norad_id: int
+    intruder_name: str | None = None
     tca_utc: datetime
     miss_distance_km: float
     relative_velocity_kms: float
@@ -122,7 +131,18 @@ class CatalogPosition(BaseModel):
     norad_id: int
     name: str
     position_km: list[float]
+    velocity_kms: list[float]
     risk_tier: str | None = None
+
+
+class CatalogPositionsResponse(BaseModel):
+    satellites: list[CatalogPosition]
+    links: list[ConjunctionLink]
+
+
+class OrbitPathResponse(BaseModel):
+    norad_id: int
+    positions_km: list[list[float]]
 
 
 class AddSatelliteRequest(BaseModel):

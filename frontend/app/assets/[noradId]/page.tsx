@@ -48,22 +48,24 @@ export default function AssetView({ params }: { params: { noradId: string } }) {
             <thead>
               <tr>
                 <th>Event</th>
-                <th>Intruder NORAD</th>
+                <th>Intruder</th>
                 <th>TCA (UTC)</th>
                 <th>Miss Distance (km)</th>
                 <th>Rel. Velocity (km/s)</th>
                 <th>Risk</th>
+                <th>Pc</th>
               </tr>
             </thead>
             <tbody>
               {events.map((event) => (
                 <tr key={event.id}>
                   <td><Link href={`/conjunctions/${event.id}`}>#{event.id}</Link></td>
-                  <td>{event.intruder_norad_id}</td>
+                  <td>{event.intruder_name || `NORAD ${event.intruder_norad_id}`}</td>
                   <td>{new Date(event.tca_utc).toISOString().slice(0, 16).replace('T', ' ')}</td>
                   <td>{event.miss_distance_km.toFixed(3)}</td>
                   <td>{event.relative_velocity_kms.toFixed(3)}</td>
                   <td><span className={`badge ${event.risk_tier.toLowerCase()}`}>{event.risk_tier}</span></td>
+                  <td>{typeof event.pc_foster === 'number' ? event.pc_foster.toExponential(2) : '—'}</td>
                 </tr>
               ))}
             </tbody>

@@ -54,11 +54,14 @@ export type CatalogItem = {
 export type Conjunction = {
   id: number;
   defended_norad_id: number;
+  defended_name?: string | null;
   intruder_norad_id: number;
+  intruder_name?: string | null;
   tca_utc: string;
   miss_distance_km: number;
   relative_velocity_kms: number;
   risk_tier: 'High' | 'Medium' | 'Low';
+  pc_foster?: number | null;
 };
 
 export type ConjunctionDetail = Conjunction & {
@@ -106,11 +109,34 @@ export type SatellitePosition = {
   norad_id: number;
   name: string;
   position_km: [number, number, number];
+  velocity_kms: [number, number, number];
   risk_tier: 'High' | 'Medium' | 'Low' | null;
 };
 
-export async function getCatalogPositions(limit = 500): Promise<SatellitePosition[]> {
-  return requestJson<SatellitePosition[]>(`/catalog/positions?limit=${limit}`);
+export type ConjunctionLink = {
+  event_id: number;
+  defended_norad_id: number;
+  intruder_norad_id: number;
+  risk_tier: 'High' | 'Medium' | 'Low';
+};
+
+export type CatalogPositionsResponse = {
+  satellites: SatellitePosition[];
+  links: ConjunctionLink[];
+};
+
+export type OrbitPathResponse = {
+  norad_id: number;
+  positions_km: [number, number, number][];
+};
+
+export async function getCatalogPositions(limit?: number): Promise<CatalogPositionsResponse> {
+  const qs = typeof limit === 'number' ? `?limit=${limit}` : '';
+  return requestJson<CatalogPositionsResponse>(`/catalog/positions${qs}`);
+}
+
+export async function getOrbitPath(noradId: number): Promise<OrbitPathResponse> {
+  return requestJson<OrbitPathResponse>(`/catalog/orbit/${noradId}`);
 }
 
 export async function addSatellite(noradId: number): Promise<CatalogItem> {

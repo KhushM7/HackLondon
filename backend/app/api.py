@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -13,6 +13,8 @@ from .schemas import (
     AvoidanceResponse,
     CatalogItem,
     CatalogPosition,
+    CatalogPositionsResponse,
+    ConjunctionLink,
     ConjunctionDetail,
     ConjunctionResponse,
     ConjunctionSummary,
@@ -22,6 +24,7 @@ from .schemas import (
     CustomSatelliteListItem,
     CustomSatelliteRequest,
     CustomSatelliteResponse,
+    OrbitPathResponse,
     OptimizeManeuverRequest,
     OptimizeManeuverResponse,
     TradeStudyEntry,
@@ -35,6 +38,161 @@ from .services.screening_engine import ScreeningEngine
 from .services.tle_validator import validate_tle
 
 router = APIRouter()
+
+
+def _name_map_for_events(db: Session, events: list[ConjunctionEvent]) -> dict[int, str]:
+    ids: set[int] = set()
+    for event in events:
+        ids.add(event.defended_norad_id)
+        ids.add(event.intruder_norad_id)
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(TLERecord.norad_id, TLERecord.name).where(TLERecord.norad_id.in_(ids))
+    ).all()
+    return {norad_id: name for norad_id, name in rows}
+
+
+def _conjunction_summary(event: ConjunctionEvent, name_map: dict[int, str]) -> dict:
+    return {
+        "id": event.id,
+        "defended_norad_id": event.defended_norad_id,
+        "defended_name": name_map.get(event.defended_norad_id),
+        "intruder_norad_id": event.intruder_norad_id,
+        "intruder_name": name_map.get(event.intruder_norad_id),
+        "tca_utc": event.tca_utc,
+        "miss_distance_km": event.miss_distance_km,
+        "relative_velocity_kms": event.relative_velocity_kms,
+        "risk_tier": event.risk_tier,
+        "risk_level": event.risk_level,
+        "pc_foster": event.pc_foster,
+    }
+
+
+def _conjunction_detail(event: ConjunctionEvent, name_map: dict[int, str]) -> dict:
+    data = _conjunction_summary(event, name_map)
+    data.update(
+        {
+            "pre_trajectory": event.pre_trajectory,
+            "intruder_trajectory": event.intruder_trajectory,
+            "post_trajectory": event.post_trajectory,
+            "post_miss_distance_km": event.post_miss_distance_km,
+            "propagation_method": event.propagation_method,
+            "covariance_source": event.covariance_source,
+            "tca_miss_vector_km": event.tca_miss_vector_km,
+            "tca_relative_speed_kms": event.tca_relative_speed_kms,
+            "b_dot_t_km": event.b_dot_t_km,
+            "b_dot_r_km": event.b_dot_r_km,
+            "b_magnitude_km": event.b_magnitude_km,
+            "pc_chan": event.pc_chan,
+            "pc_monte_carlo": event.pc_monte_carlo,
+            "pc_monte_carlo_ci_low": event.pc_monte_carlo_ci_low,
+            "pc_monte_carlo_ci_high": event.pc_monte_carlo_ci_high,
+            "pc_method_used": event.pc_method_used,
+            "hard_body_radius_km": event.hard_body_radius_km,
+            "post_maneuver_delta_v_mps": event.post_maneuver_delta_v_mps,
+            "post_maneuver_direction": event.post_maneuver_direction,
+            "post_maneuver_burn_epoch": event.post_maneuver_burn_epoch,
+            "post_maneuver_pc": event.post_maneuver_pc,
+            "post_maneuver_miss_distance_km": event.post_maneuver_miss_distance_km,
+            "post_maneuver_fuel_cost_kg": event.post_maneuver_fuel_cost_kg,
+            "post_maneuver_trajectory": event.post_maneuver_trajectory,
+        }
+    )
+    return data
+
+
+def _component_priority(links: list[ConjunctionEvent]) -> tuple[int, float]:
+    risk_order = {"High": 3, "Medium": 2, "Low": 1}
+    max_risk = 0
+    min_miss = float("inf")
+    for event in links:
+        max_risk = max(max_risk, risk_order.get(event.risk_tier, 0))
+        min_miss = min(min_miss, event.miss_distance_km)
+    return (max_risk, -min_miss)
+
+
+def _select_satellite_ids_with_pairs(
+    db: Session, limit: int
+) -> tuple[list[int], list[ConjunctionEvent]]:
+    events = db.execute(select(ConjunctionEvent)).scalars().all()
+    if not events:
+        ids = db.execute(select(TLERecord.norad_id).limit(limit)).scalars().all()
+        return list(ids), []
+
+    graph: dict[int, set[int]] = {}
+    events_by_node: dict[int, list[ConjunctionEvent]] = {}
+    for event in events:
+        a = event.defended_norad_id
+        b = event.intruder_norad_id
+        graph.setdefault(a, set()).add(b)
+        graph.setdefault(b, set()).add(a)
+        events_by_node.setdefault(a, []).append(event)
+        events_by_node.setdefault(b, []).append(event)
+
+    visited: set[int] = set()
+    components: list[tuple[list[int], list[ConjunctionEvent]]] = []
+    for node in graph.keys():
+        if node in visited:
+            continue
+        stack = [node]
+        comp_nodes: list[int] = []
+        comp_events: list[ConjunctionEvent] = []
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            comp_nodes.append(current)
+            comp_events.extend(events_by_node.get(current, []))
+            for neighbor in graph.get(current, set()):
+                if neighbor not in visited:
+                    stack.append(neighbor)
+        # De-dup events in component
+        unique_events = {e.id: e for e in comp_events}
+        components.append((comp_nodes, list(unique_events.values())))
+
+    components.sort(
+        key=lambda item: _component_priority(item[1]),
+        reverse=True,
+    )
+
+    selected: list[int] = []
+    selected_set: set[int] = set()
+    selected_events: list[ConjunctionEvent] = []
+
+    for comp_nodes, comp_events in components:
+        if len(selected) + len(comp_nodes) > limit:
+            continue
+        for node in comp_nodes:
+            if node not in selected_set:
+                selected_set.add(node)
+                selected.append(node)
+        selected_events.extend(comp_events)
+        if len(selected) >= limit:
+            break
+
+    if len(selected) < limit:
+        graph_nodes = set(graph.keys())
+        remaining = db.execute(
+            select(TLERecord.norad_id)
+            .where(
+                ~TLERecord.norad_id.in_(selected_set),
+                ~TLERecord.norad_id.in_(graph_nodes),
+            )
+            .limit(limit - len(selected))
+        ).scalars().all()
+        for norad_id in remaining:
+            selected_set.add(norad_id)
+            selected.append(norad_id)
+
+    # Only keep events whose endpoints are both selected
+    selected_events = [
+        event for event in events
+        if event.defended_norad_id in selected_set and event.intruder_norad_id in selected_set
+    ]
+
+    return selected, selected_events
 
 
 @router.get("/catalog", response_model=list[CatalogItem])
@@ -66,7 +224,9 @@ def asset_conjunctions(
         PropagateEngine(settings.propagation_horizon_days, settings.propagation_resolution_seconds),
     )
     results = engine.find_conjunctions(norad_id, days=days)
-    return sorted(results, key=lambda x: x.miss_distance_km)
+    ordered = sorted(results, key=lambda x: x.miss_distance_km)
+    name_map = _name_map_for_events(db, ordered)
+    return [_conjunction_summary(event, name_map) for event in ordered]
 
 
 @router.get("/conjunctions/{event_id}", response_model=ConjunctionDetail)
@@ -74,7 +234,8 @@ def conjunction_detail(event_id: int, db: Session = Depends(get_session)):
     event = db.execute(select(ConjunctionEvent).where(ConjunctionEvent.id == event_id)).scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="Conjunction event not found")
-    return event
+    name_map = _name_map_for_events(db, [event])
+    return _conjunction_detail(event, name_map)
 
 
 @router.post("/conjunctions/{event_id}/avoidance-sim", response_model=AvoidanceResponse)
@@ -324,39 +485,58 @@ def delete_custom_satellite(norad_id: int, db: Session = Depends(get_session)):
     return {"detail": f"Satellite {norad_id} and associated conjunction events deleted"}
 
 
-@router.get("/catalog/positions", response_model=list[CatalogPosition])
-def catalog_positions(limit: int = Query(default=500, ge=1, le=2000), db: Session = Depends(get_session)):
+@router.get("/catalog/positions", response_model=CatalogPositionsResponse)
+def catalog_positions(limit: int = Query(default=500, ge=1, le=5000), db: Session = Depends(get_session)):
     from sgp4.api import Satrec, jday as sgp4_jday
 
     now = datetime.utcnow()
     jd, fr = sgp4_jday(now.year, now.month, now.day, now.hour, now.minute, now.second + now.microsecond / 1e6)
 
-    records = db.execute(select(TLERecord).limit(limit)).scalars().all()
+    selected_ids, selected_events = _select_satellite_ids_with_pairs(db, limit)
+    if not selected_ids:
+        return CatalogPositionsResponse(satellites=[], links=[])
+
+    records = db.execute(
+        select(TLERecord).where(TLERecord.norad_id.in_(selected_ids))
+    ).scalars().all()
 
     risk_order = {"High": 3, "Medium": 2, "Low": 1}
-    rows = db.execute(select(ConjunctionEvent.defended_norad_id, ConjunctionEvent.risk_tier)).all()
     risk_map: dict[int, str] = {}
-    for norad_id, tier in rows:
-        if risk_order.get(tier, 0) > risk_order.get(risk_map.get(norad_id, ""), 0):
-            risk_map[norad_id] = tier
+    for event in selected_events:
+        tier = event.risk_tier
+        for norad_id in (event.defended_norad_id, event.intruder_norad_id):
+            if risk_order.get(tier, 0) > risk_order.get(risk_map.get(norad_id, ""), 0):
+                risk_map[norad_id] = tier
 
     result: list[CatalogPosition] = []
     for record in records:
         try:
             sat = Satrec.twoline2rv(record.line1, record.line2)
-            err, position, _ = sat.sgp4(jd, fr)
+            err, position, velocity = sat.sgp4(jd, fr)
             if err == 0:
                 result.append(
                     CatalogPosition(
                         norad_id=record.norad_id,
                         name=record.name,
                         position_km=[float(v) for v in position],
+                        velocity_kms=[float(v) for v in velocity],
                         risk_tier=risk_map.get(record.norad_id),
                     )
                 )
         except Exception:
             pass
-    return result
+
+    links = [
+        ConjunctionLink(
+            event_id=event.id,
+            defended_norad_id=event.defended_norad_id,
+            intruder_norad_id=event.intruder_norad_id,
+            risk_tier=event.risk_tier,
+        )
+        for event in selected_events
+    ]
+
+    return CatalogPositionsResponse(satellites=result, links=links)
 
 
 @router.get("/congestion", response_model=CongestionResponse)
@@ -364,3 +544,38 @@ def congestion(db: Session = Depends(get_session)):
     analyser = CongestionAnalyser(db)
     bands = [CongestionBand(**band) for band in analyser.compute()]
     return CongestionResponse(generated_at=datetime.utcnow(), bands=bands)
+
+
+@router.get("/catalog/orbit/{norad_id}", response_model=OrbitPathResponse)
+def catalog_orbit(norad_id: int, db: Session = Depends(get_session)):
+    from sgp4.api import Satrec, jday as sgp4_jday
+
+    record = db.execute(select(TLERecord).where(TLERecord.norad_id == norad_id)).scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Satellite {norad_id} not found")
+
+    mean_motion = record.mean_motion or 0.0
+    period_seconds = 86400.0 / mean_motion if mean_motion > 0 else 5400.0
+    period_seconds = max(1800.0, min(period_seconds, 21600.0))
+    step_seconds = 120.0
+
+    now = datetime.utcnow()
+    sat = Satrec.twoline2rv(record.line1, record.line2)
+    positions: list[list[float]] = []
+    t = 0.0
+    while t <= period_seconds:
+        dt = now + timedelta(seconds=t)
+        jd, fr = sgp4_jday(
+            dt.year,
+            dt.month,
+            dt.day,
+            dt.hour,
+            dt.minute,
+            dt.second + dt.microsecond / 1e6,
+        )
+        err, pos, _vel = sat.sgp4(jd, fr)
+        if err == 0:
+            positions.append([float(v) for v in pos])
+        t += step_seconds
+
+    return OrbitPathResponse(norad_id=norad_id, positions_km=positions)

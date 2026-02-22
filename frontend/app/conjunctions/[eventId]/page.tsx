@@ -30,8 +30,11 @@ export default async function ConjunctionView({ params }: { params: { eventId: s
       <div className="panel">
         <h2>Conjunction Event #{event.id}</h2>
         <p>
-          Defended {event.defended_norad_id} vs Intruder {event.intruder_norad_id} | Miss Distance {event.miss_distance_km.toFixed(3)} km
+          Defended {event.defended_name || `NORAD ${event.defended_norad_id}`} vs Intruder {event.intruder_name || `NORAD ${event.intruder_norad_id}`} | Miss Distance {event.miss_distance_km.toFixed(3)} km
         </p>
+        {typeof event.pc_foster === 'number' && (
+          <p>Collision Probability (Pc): {event.pc_foster.toExponential(2)}</p>
+        )}
         <p className="disclaimer">Closest approach replay with pre/post manoeuvre comparison.</p>
         <Link href={`/assets/${event.defended_norad_id}`}>Back to Asset</Link>
       </div>

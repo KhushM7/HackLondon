@@ -69,12 +69,33 @@ class IngestService:
         return parsed
 
     def _upsert_records(self, records: list[dict]) -> None:
+        now = datetime.utcnow()
+        payload = [{**record, "updated_at": now} for record in records]
+
+        bind = self.db.get_bind()
+        if bind is not None and bind.dialect.name == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            stmt = sqlite_insert(TLERecord).values(payload)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[TLERecord.norad_id],
+                set_={
+                    "name": stmt.excluded.name,
+                    "line1": stmt.excluded.line1,
+                    "line2": stmt.excluded.line2,
+                    "inclination_deg": stmt.excluded.inclination_deg,
+                    "mean_motion": stmt.excluded.mean_motion,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            self.db.execute(stmt)
+            return
+
         existing = {
             row.norad_id: row
             for row in self.db.execute(select(TLERecord)).scalars().all()
         }
-        now = datetime.utcnow()
-        for record in records:
+        for record in payload:
             entity = existing.get(record["norad_id"])
             if entity:
                 entity.name = record["name"]
@@ -84,7 +105,7 @@ class IngestService:
                 entity.mean_motion = record["mean_motion"]
                 entity.updated_at = now
             else:
-                self.db.add(TLERecord(**record, updated_at=now))
+                self.db.add(TLERecord(**record))
 
     async def ingest_satellite_by_norad_id(self, norad_id: int) -> TLERecord:
         url = f"https://celestrak.org/NORAD/elements/gp.php?CATNR={norad_id}&FORMAT=tle"

@@ -1,15 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import {
   CatalogItem,
   Conjunction,
+  ConjunctionLink,
   SatellitePosition,
   getCatalogPositions,
   getCongestion,
   getConjunctions,
+  getOrbitPath,
   refreshIngest,
 } from '../lib/api';
 import { AddSatelliteModal } from './AddSatelliteModal';
@@ -122,6 +124,9 @@ function DraggableWindow({ title, children, onClose, width, initialX, initialY }
 
 export function DashboardClient() {
   const [satellites, setSatellites] = useState<SatellitePosition[]>([]);
+  const [links, setLinks] = useState<ConjunctionLink[]>([]);
+  const [orbitPath, setOrbitPath] = useState<[number, number, number][]>([]);
+  const [relatedOrbits, setRelatedOrbits] = useState<{ norad_id: number; positions_km: [number, number, number][] }[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [events, setEvents] = useState<Conjunction[]>([]);
   const [bands, setBands] = useState<{ altitude_band_km: string; object_count: number; conjunction_rate: number }[]>([]);
@@ -132,15 +137,21 @@ export function DashboardClient() {
   const [showMenu, setShowMenu] = useState(false);
   const [showConjFloat, setShowConjFloat] = useState(false);
   const [showCongFloat, setShowCongFloat] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const refreshTimerRef = useRef<number | null>(null);
+
+  const nameById = useMemo(() => new Map(satellites.map((s) => [s.norad_id, s.name])), [satellites]);
 
   useEffect(() => {
     async function load() {
       try {
         const [positions, congestion] = await Promise.all([
-          getCatalogPositions(),
+          getCatalogPositions(500),
           getCongestion(),
         ]);
-        setSatellites(positions);
+        setSatellites(positions.satellites);
+        setLinks(positions.links);
         setBands(congestion.bands);
         setError(null);
       } catch {
@@ -153,30 +164,71 @@ export function DashboardClient() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (selectedId !== null) {
       getConjunctions(selectedId).then(setEvents).catch(() => setEvents([]));
+      getOrbitPath(selectedId)
+        .then((data) => setOrbitPath(data.positions_km))
+        .catch(() => setOrbitPath([]));
+      const relatedIds = links
+        .filter((link) => link.risk_tier === 'High' || link.risk_tier === 'Medium')
+        .filter((link) => link.defended_norad_id === selectedId || link.intruder_norad_id === selectedId)
+        .flatMap((link) => [link.defended_norad_id, link.intruder_norad_id])
+        .filter((id) => id !== selectedId);
+      if (relatedIds.length > 0) {
+        const uniqueIds = Array.from(new Set(relatedIds));
+        Promise.all(uniqueIds.map((id) => getOrbitPath(id)))
+          .then((items) => setRelatedOrbits(items))
+          .catch(() => setRelatedOrbits([]));
+      } else {
+        setRelatedOrbits([]);
+      }
       setShowConjFloat(true);
     } else {
       setEvents([]);
+      setOrbitPath([]);
+      setRelatedOrbits([]);
     }
-  }, [selectedId]);
+  }, [selectedId, links]);
 
   async function triggerRefresh() {
     try {
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+      setRefreshing(true);
+      setRefreshMessage('Refreshing…');
       await refreshIngest();
-      const [positions, congestion] = await Promise.all([getCatalogPositions(), getCongestion()]);
-      setSatellites(positions);
+      const [positions, congestion] = await Promise.all([getCatalogPositions(500), getCongestion()]);
+      setSatellites(positions.satellites);
+      setLinks(positions.links);
       setBands(congestion.bands);
       setError(null);
+      setRefreshMessage('Refresh complete');
+      refreshTimerRef.current = window.setTimeout(() => setRefreshMessage(null), 2000);
     } catch {
       setError('Manual refresh failed. Verify backend is running and reachable.');
+      setRefreshMessage('Refresh failed');
+      refreshTimerRef.current = window.setTimeout(() => setRefreshMessage(null), 3000);
+    } finally {
+      setRefreshing(false);
     }
   }
 
   async function handleSatelliteAdded(sat: CatalogItem) {
     try {
-      const positions = await getCatalogPositions();
-      setSatellites(positions);
+      const positions = await getCatalogPositions(500);
+      setSatellites(positions.satellites);
+      setLinks(positions.links);
       setSelectedId(sat.norad_id);
     } catch {
       // positions reload failed; globe will show on next full refresh
@@ -193,6 +245,9 @@ export function DashboardClient() {
       <div style={{ position: 'absolute', inset: 0 }}>
         <GlobeView
           satellites={satellites}
+          links={links}
+          orbitPath={orbitPath}
+          relatedOrbits={relatedOrbits}
           selectedId={selectedId}
           onSelect={setSelectedId}
           showAtRiskOnly={showAtRiskOnly}
@@ -316,9 +371,14 @@ export function DashboardClient() {
         </button>
 
         {/* Refresh */}
-        <button onClick={triggerRefresh}>
-          ↺ REFRESH
+        <button onClick={triggerRefresh} disabled={refreshing}>
+          {refreshing ? '↺ REFRESHING…' : '↺ REFRESH'}
         </button>
+        {refreshMessage ? (
+          <span className="hud-label" style={{ marginLeft: -6 }}>
+            {refreshMessage}
+          </span>
+        ) : null}
 
         {/* Menu button + dropdown */}
         <div style={{ position: 'relative' }}>
@@ -560,25 +620,31 @@ export function DashboardClient() {
                 <thead>
                   <tr>
                     <th>Event</th>
+                    <th>With</th>
                     <th>TCA (UTC)</th>
                     <th>Miss km</th>
                     <th>Risk</th>
+                    <th>Pc</th>
                   </tr>
                 </thead>
                 <tbody>
                   {events.map((ev) => (
                     <tr key={ev.id}>
                       <td><Link href={`/conjunctions/${ev.id}`}>#{ev.id}</Link></td>
+                      <td>
+                        {ev.intruder_name || nameById.get(ev.intruder_norad_id) || `NORAD ${ev.intruder_norad_id}`}
+                      </td>
                       <td>{new Date(ev.tca_utc).toISOString().slice(0, 16).replace('T', ' ')}</td>
                       <td>{ev.miss_distance_km.toFixed(2)}</td>
                       <td>
                         <span className={`badge ${ev.risk_tier.toLowerCase()}`}>{ev.risk_tier}</span>
                       </td>
+                      <td>{typeof ev.pc_foster === 'number' ? ev.pc_foster.toExponential(2) : '—'}</td>
                     </tr>
                   ))}
                   {events.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="disclaimer" style={{ padding: '0.75rem 0.5rem' }}>
+                      <td colSpan={6} className="disclaimer" style={{ padding: '0.75rem 0.5rem' }}>
                         No conjunctions recorded for this asset
                       </td>
                     </tr>
