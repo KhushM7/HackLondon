@@ -15,6 +15,22 @@ function eciToScene(pos: [number, number, number]): [number, number, number] {
   return [pos[0] * S, pos[2] * S, pos[1] * S];
 }
 
+// Approximate sun direction in ECI (J2000-based) for real-time lighting.
+function sunDirectionEci(date: Date): THREE.Vector3 {
+  const dayMs = 1000 * 60 * 60 * 24;
+  const j2000 = Date.UTC(2000, 0, 1, 12, 0, 0);
+  const d = (date.getTime() - j2000) / dayMs;
+  const toRad = Math.PI / 180;
+  const g = (357.529 + 0.98560028 * d) * toRad; // mean anomaly
+  const q = (280.459 + 0.98564736 * d) * toRad; // mean longitude
+  const L = q + (1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * toRad; // ecliptic longitude
+  const e = (23.439 - 0.00000036 * d) * toRad; // obliquity
+  const x = Math.cos(L);
+  const y = Math.cos(e) * Math.sin(L);
+  const z = Math.sin(e) * Math.sin(L);
+  return new THREE.Vector3(x, y, z).normalize();
+}
+
 function riskColor(tier: string | null | undefined): string {
   if (tier === 'High') return '#ff6b6b';
   if (tier === 'Medium') return '#ffd56b';
@@ -201,6 +217,16 @@ function Scene({
   onSelect: (id: number | null) => void;
   showAtRiskOnly: boolean;
 }) {
+  const sunLightRef = useRef<THREE.DirectionalLight>(null);
+
+  useFrame(() => {
+    const light = sunLightRef.current;
+    if (!light) return;
+    const sunEci = sunDirectionEci(new Date());
+    const [sx, sy, sz] = eciToScene([sunEci.x, sunEci.y, sunEci.z]);
+    light.position.set(sx * 12, sy * 12, sz * 12);
+  });
+
   const visible = showAtRiskOnly
     ? satellites.filter((s) => s.risk_tier === 'High' || s.risk_tier === 'Medium')
     : satellites;
@@ -283,7 +309,7 @@ function Scene({
   return (
     <>
       <ambientLight intensity={0.3} />
-      <directionalLight position={[5, 3, 5]} intensity={1.5} />
+      <directionalLight ref={sunLightRef} position={[5, 3, 5]} intensity={1.5} />
       <pointLight position={[-8, -4, -6]} intensity={0.3} color="#3a6aaa" />
       <Controls />
       <Earth />
