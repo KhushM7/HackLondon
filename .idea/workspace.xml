@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="Added code for custom satellite (api broken)">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    <list default="true" id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="backend">
+      <change beforePath="$PROJECT_DIR$/backend/app/services/ingest_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/ingest_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/orbitguard.db" beforeDir="false" afterPath="$PROJECT_DIR$/backend/orbitguard.db" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -78,7 +78,7 @@
       <workItem from="1771697928600" duration="6896000" />
       <workItem from="1771714032519" duration="2176000" />
       <workItem from="1771716335587" duration="6097000" />
-      <workItem from="1771738258583" duration="424000" />
+      <workItem from="1771738258583" duration="793000" />
     </task>
     <task id="LOCAL-00001" summary="Added complex route collision to the backend">
       <option name="closed" value="true" />
@@ -144,7 +144,15 @@
       <option name="project" value="LOCAL" />
       <updated>1771721661919</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="backend">
+      <option name="closed" value="true" />
+      <created>1771738885461</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1771738885461</updated>
+    </task>
+    <option name="localTasksCounter" value="10" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -158,7 +166,8 @@
     <MESSAGE value="Updated gitignnore" />
     <MESSAGE value="Updated gitignnore and db" />
     <MESSAGE value="Frontend changes to custom satellite" />
-    <option name="LAST_COMMIT_MESSAGE" value="Frontend changes to custom satellite" />
+    <MESSAGE value="backend" />
+    <option name="LAST_COMMIT_MESSAGE" value="backend" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

@@ -4,7 +4,7 @@ from datetime import datetime
 
 import httpx
 from sgp4.api import Satrec
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -18,6 +18,8 @@ class TLESourceError(Exception):
 
 
 class IngestService:
+    SQLITE_FALLBACK_MAX_BIND_VARS = 999
+
     def __init__(self, db: Session):
         self.db = db
 
@@ -69,6 +71,9 @@ class IngestService:
         return parsed
 
     def _upsert_records(self, records: list[dict]) -> None:
+        if not records:
+            return
+
         now = datetime.utcnow()
         payload = [{**record, "updated_at": now} for record in records]
 
@@ -76,19 +81,25 @@ class IngestService:
         if bind is not None and bind.dialect.name == "sqlite":
             from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-            stmt = sqlite_insert(TLERecord).values(payload)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[TLERecord.norad_id],
-                set_={
-                    "name": stmt.excluded.name,
-                    "line1": stmt.excluded.line1,
-                    "line2": stmt.excluded.line2,
-                    "inclination_deg": stmt.excluded.inclination_deg,
-                    "mean_motion": stmt.excluded.mean_motion,
-                    "updated_at": stmt.excluded.updated_at,
-                },
-            )
-            self.db.execute(stmt)
+            single_row_stmt = sqlite_insert(TLERecord).values(payload[0])
+            bind_vars_per_row = max(1, len(single_row_stmt.compile(dialect=bind.dialect).params))
+            max_bind_vars = self._sqlite_max_bind_vars()
+            batch_size = max(1, max_bind_vars // bind_vars_per_row)
+
+            for start in range(0, len(payload), batch_size):
+                stmt = sqlite_insert(TLERecord).values(payload[start : start + batch_size])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[TLERecord.norad_id],
+                    set_={
+                        "name": stmt.excluded.name,
+                        "line1": stmt.excluded.line1,
+                        "line2": stmt.excluded.line2,
+                        "inclination_deg": stmt.excluded.inclination_deg,
+                        "mean_motion": stmt.excluded.mean_motion,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                )
+                self.db.execute(stmt)
             return
 
         existing = {
@@ -166,3 +177,17 @@ class IngestService:
         n = no_kozai / 60.0
         a = (mu / (n * n)) ** (1.0 / 3.0)
         return a - 6378.137
+
+    def _sqlite_max_bind_vars(self) -> int:
+        try:
+            options = self.db.execute(text("PRAGMA compile_options")).scalars().all()
+        except Exception:
+            return self.SQLITE_FALLBACK_MAX_BIND_VARS
+
+        for option in options:
+            if option.startswith("MAX_VARIABLE_NUMBER="):
+                try:
+                    return max(int(option.split("=", 1)[1]), 1)
+                except ValueError:
+                    break
+        return self.SQLITE_FALLBACK_MAX_BIND_VARS
