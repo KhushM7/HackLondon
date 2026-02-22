@@ -121,14 +121,27 @@ export async function addSatellite(noradId: number): Promise<CatalogItem> {
   });
 }
 
+export type CustomSatelliteResponse = {
+  satellite: CatalogItem;
+  conjunctions_found: number;
+  events: {
+    id: number;
+    intruder_norad_id: number;
+    tca_utc: string;
+    miss_distance_km: number;
+    risk_tier: string;
+  }[];
+};
+
 export async function addCustomSatellite(payload: {
   name: string;
   line1: string;
   line2: string;
 }): Promise<CatalogItem> {
-  return requestJson<CatalogItem>('/catalog/custom-satellite', {
+  const resp = await requestJson<CustomSatelliteResponse>('/catalog/custom-satellite', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  return resp.satellite;
 }

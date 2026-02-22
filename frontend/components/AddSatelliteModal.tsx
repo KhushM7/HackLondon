@@ -147,7 +147,7 @@ export function AddSatelliteModal({
               <label style={{ display: 'grid', gap: 4 }}>
                 <span style={{ fontSize: '0.9rem' }}>TLE Line 1</span>
                 <textarea
-                  placeholder="1 90001U 24001A   26052.50000000  .00010000  00000-0  15000-3 0  9991"
+                  placeholder="1 90001U 24001A   26052.50000000  .00010000  00000-0  15000-3 0  9997"
                   value={line1}
                   onChange={(e) => setLine1(e.target.value)}
                   rows={2}
@@ -158,7 +158,7 @@ export function AddSatelliteModal({
               <label style={{ display: 'grid', gap: 4 }}>
                 <span style={{ fontSize: '0.9rem' }}>TLE Line 2</span>
                 <textarea
-                  placeholder="2 90001  51.6400 210.5000 0005000  75.0000 285.0000 15.50000000 12345"
+                  placeholder="2 90001  51.6400 210.5000 0005000  75.0000 285.0000 15.50000000 12349"
                   value={line2}
                   onChange={(e) => setLine2(e.target.value)}
                   rows={2}
