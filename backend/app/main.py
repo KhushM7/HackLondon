@@ -8,7 +8,6 @@ from sqlalchemy import text
 from .api import router
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .schema_migrations import apply_startup_sqlite_migrations
 from .services.ingest_service import IngestService, TLESourceError
 
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +44,6 @@ async def ingestion_loop() -> None:
 @app.on_event("startup")
 async def startup_event() -> None:
     Base.metadata.create_all(bind=engine)
-    apply_startup_sqlite_migrations(engine)
     db = SessionLocal()
     try:
         # Improves candidate filtering speed for screening queries.
