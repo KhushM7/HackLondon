@@ -1,21 +1,29 @@
 'use client';
 
+import { useEffect, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
+import * as THREE from 'three';
 
 type Sample = { position_km: number[] };
 
 function OrbitLine({ points, color }: { points: Sample[]; color: string }) {
-  const scaled = points.map((p) => [p.position_km[0] / 2000, p.position_km[1] / 2000, p.position_km[2] / 2000]);
+  const geometry = useMemo(() => {
+    const scaled = points.map((p) => [
+      p.position_km[0] / 2000,
+      p.position_km[1] / 2000,
+      p.position_km[2] / 2000,
+    ]);
+    const positions = new Float32Array(scaled.flat());
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.computeBoundingSphere();
+    return geom;
+  }, [points]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
   return (
-    <line>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={scaled.length}
-          array={new Float32Array(scaled.flat())}
-          itemSize={3}
-        />
-      </bufferGeometry>
+    <line geometry={geometry} frustumCulled={false}>
       <lineBasicMaterial color={color} />
     </line>
   );

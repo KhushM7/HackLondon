@@ -22,12 +22,6 @@ function riskColor(tier: string | null | undefined): string {
   return '#3a6a9a';
 }
 
-function riskLineColor(tier: string): string {
-  if (tier === 'High') return '#ff7b7b';
-  if (tier === 'Medium') return '#ffe08f';
-  return '#9bf3b1';
-}
-
 function velocityToScene(vec: [number, number, number]): [number, number, number] {
   return [vec[0], vec[2], vec[1]];
 }
@@ -139,29 +133,27 @@ function Atmosphere() {
   );
 }
 
-function DashedOrbit({ points, color = '#b8e9ff' }: { points: THREE.Vector3[]; color?: string }) {
-  const lineRef = useRef<THREE.Line>(null);
+function OrbitTube({ points, color = '#7ad6ff', opacity = 0.6, radius = 0.01 }: { points: THREE.Vector3[]; color?: string; opacity?: number; radius?: number }) {
+  const geometry = useMemo(() => {
+    if (points.length < 2) return null;
+    const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5);
+    const geom = new THREE.TubeGeometry(curve, 128, radius, 8, false);
+    geom.computeBoundingSphere();
+    return geom;
+  }, [points, radius]);
 
   useEffect(() => {
-    if (lineRef.current) {
-      lineRef.current.computeLineDistances();
-    }
-  }, [points]);
+    return () => {
+      geometry?.dispose();
+    };
+  }, [geometry]);
 
-  if (points.length < 2) return null;
+  if (!geometry) return null;
 
   return (
-    <line ref={lineRef}>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={points.length}
-          array={new Float32Array(points.flatMap((p) => [p.x, p.y, p.z]))}
-          itemSize={3}
-        />
-      </bufferGeometry>
-      <lineDashedMaterial color={color} dashSize={0.04} gapSize={0.03} transparent opacity={0.75} />
-    </line>
+    <mesh geometry={geometry} frustumCulled={false}>
+      <meshBasicMaterial color={color} transparent opacity={opacity} />
+    </mesh>
   );
 }
 
@@ -257,47 +249,6 @@ function Scene({
     );
   }, [links, selectedId]);
 
-  const lineSegments = useMemo(() => {
-    const segments: { key: string; curve: THREE.CatmullRomCurve3; color: string }[] = [];
-    const radius = 1.0;
-    const minHeight = 0.08;
-    const maxHeight = 0.35;
-    const steps = 24;
-
-    for (const link of selectedLinks) {
-      const a = posById.get(link.defended_norad_id);
-      const b = posById.get(link.intruder_norad_id);
-      if (!a || !b) continue;
-
-      const aUnit = a.clone().normalize();
-      const bUnit = b.clone().normalize();
-      const dot = THREE.MathUtils.clamp(aUnit.dot(bUnit), -1, 1);
-      const angle = Math.acos(dot);
-      const sinAngle = Math.sin(angle);
-      if (sinAngle < 1e-6) continue;
-
-      const height = minHeight + (maxHeight - minHeight) * (angle / Math.PI);
-      const points: THREE.Vector3[] = [];
-
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const s0 = Math.sin((1 - t) * angle) / sinAngle;
-        const s1 = Math.sin(t * angle) / sinAngle;
-        const dir = aUnit.clone().multiplyScalar(s0).add(bUnit.clone().multiplyScalar(s1));
-        const scale = radius + height * Math.sin(Math.PI * t);
-        const p = dir.multiplyScalar(scale);
-        points.push(p);
-      }
-
-      segments.push({
-        key: `${link.event_id}-${link.defended_norad_id}-${link.intruder_norad_id}`,
-        curve: new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5),
-        color: riskLineColor(link.risk_tier),
-      });
-    }
-    return segments;
-  }, [selectedLinks, posById]);
-
   const arrowIds = useMemo(() => {
     const ids = new Set<number>();
     if (selectedId !== null) {
@@ -338,28 +289,10 @@ function Scene({
       <Earth />
       <GridLines />
       <Atmosphere />
-      {lineSegments.map((seg) => (
-        <mesh key={seg.key}>
-          <tubeGeometry args={[seg.curve, 64, 0.006, 8, false]} />
-          <meshBasicMaterial color={seg.color} transparent opacity={0.7} />
-        </mesh>
-      ))}
-      {selectedId !== null && orbitPoints.length > 1 && (
-        <line>
-          <bufferGeometry>
-            <bufferAttribute
-              attach="attributes-position"
-              count={orbitPoints.length}
-              array={new Float32Array(orbitPoints.flatMap((p) => [p.x, p.y, p.z]))}
-              itemSize={3}
-            />
-          </bufferGeometry>
-          <lineBasicMaterial color="#7ad6ff" transparent opacity={0.6} />
-        </line>
-      )}
+      {selectedId !== null && <OrbitTube points={orbitPoints} />}
       {selectedId !== null &&
         relatedOrbitPoints.map((entry) => (
-          <DashedOrbit key={`orbit-${entry.norad_id}`} points={entry.points} />
+          <OrbitTube key={`orbit-${entry.norad_id}`} points={entry.points} color="#b8e9ff" opacity={0.45} radius={0.007} />
         ))}
       {selectedId !== null &&
         relatedArrows.map((arrow) => (
