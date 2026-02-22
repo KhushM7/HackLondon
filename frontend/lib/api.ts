@@ -85,8 +85,19 @@ export async function refreshIngest(): Promise<{ ingested: number }> {
   return requestJson<{ ingested: number }>('/ingest/refresh', { method: 'POST' });
 }
 
+const conjunctionsInFlight = new Map<number, Promise<Conjunction[]>>();
+
 export async function getConjunctions(noradId: number): Promise<Conjunction[]> {
-  return requestJson<Conjunction[]>(`/assets/${noradId}/conjunctions`);
+  const existing = conjunctionsInFlight.get(noradId);
+  if (existing) {
+    return existing;
+  }
+
+  const request = requestJson<Conjunction[]>(`/assets/${noradId}/conjunctions`).finally(() => {
+    conjunctionsInFlight.delete(noradId);
+  });
+  conjunctionsInFlight.set(noradId, request);
+  return request;
 }
 
 export async function getConjunction(eventId: number): Promise<ConjunctionDetail> {
@@ -159,15 +170,29 @@ export type CustomSatelliteResponse = {
   }[];
 };
 
+const customSatelliteInFlight = new Map<string, Promise<CatalogItem>>();
+
 export async function addCustomSatellite(payload: {
   name: string;
   line1: string;
   line2: string;
 }): Promise<CatalogItem> {
-  const resp = await requestJson<CustomSatelliteResponse>('/catalog/custom-satellite', {
+  const key = `${payload.name.trim().toLowerCase()}|${payload.line1.trim()}|${payload.line2.trim()}`;
+  const existing = customSatelliteInFlight.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const request = requestJson<CustomSatelliteResponse>('/catalog/custom-satellite', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
-  });
-  return resp.satellite;
+  })
+    .then((resp) => resp.satellite)
+    .finally(() => {
+      customSatelliteInFlight.delete(key);
+    });
+
+  customSatelliteInFlight.set(key, request);
+  return request;
 }

@@ -3,6 +3,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from .api import router
 from .config import settings
@@ -40,6 +41,18 @@ async def ingestion_loop() -> None:
 @app.on_event("startup")
 async def startup_event() -> None:
     Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        # Improves candidate filtering speed for screening queries.
+        db.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_tle_screening_inc_mean "
+                "ON tle_records (inclination_deg, mean_motion)"
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
     asyncio.create_task(ingestion_loop())
 
 

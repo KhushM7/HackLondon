@@ -18,6 +18,8 @@ class TLESourceError(Exception):
 
 
 class IngestService:
+    SQLITE_SAFE_MAX_BIND_VARS = 900
+
     def __init__(self, db: Session):
         self.db = db
 
@@ -69,6 +71,9 @@ class IngestService:
         return parsed
 
     def _upsert_records(self, records: list[dict]) -> None:
+        if not records:
+            return
+
         now = datetime.utcnow()
         payload = [{**record, "updated_at": now} for record in records]
 
@@ -76,19 +81,24 @@ class IngestService:
         if bind is not None and bind.dialect.name == "sqlite":
             from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-            stmt = sqlite_insert(TLERecord).values(payload)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[TLERecord.norad_id],
-                set_={
-                    "name": stmt.excluded.name,
-                    "line1": stmt.excluded.line1,
-                    "line2": stmt.excluded.line2,
-                    "inclination_deg": stmt.excluded.inclination_deg,
-                    "mean_motion": stmt.excluded.mean_motion,
-                    "updated_at": stmt.excluded.updated_at,
-                },
-            )
-            self.db.execute(stmt)
+            single_row_stmt = sqlite_insert(TLERecord).values(payload[0])
+            bind_vars_per_row = max(1, len(single_row_stmt.compile(dialect=bind.dialect).params))
+            batch_size = max(1, self.SQLITE_SAFE_MAX_BIND_VARS // bind_vars_per_row)
+
+            for start in range(0, len(payload), batch_size):
+                stmt = sqlite_insert(TLERecord).values(payload[start : start + batch_size])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[TLERecord.norad_id],
+                    set_={
+                        "name": stmt.excluded.name,
+                        "line1": stmt.excluded.line1,
+                        "line2": stmt.excluded.line2,
+                        "inclination_deg": stmt.excluded.inclination_deg,
+                        "mean_motion": stmt.excluded.mean_motion,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                )
+                self.db.execute(stmt)
             return
 
         existing = {

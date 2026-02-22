@@ -175,20 +175,21 @@ function OrbitTube({ points, color = '#7ad6ff', opacity = 0.6, radius = 0.01 }: 
 
 function SatDot({
   sat,
+  position,
   selected,
   onClick,
 }: {
   sat: SatellitePosition;
+  position: [number, number, number];
   selected: boolean;
   onClick: () => void;
 }) {
-  const pos = useMemo(() => eciToScene(sat.position_km), [sat.position_km]);
   const color = selected ? '#ffffff' : riskColor(sat.risk_tier);
   const size = selected ? 0.028 : sat.risk_tier ? 0.018 : 0.01;
 
   return (
     <mesh
-      position={pos}
+      position={position}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -230,6 +231,57 @@ function Scene({
   const visible = showAtRiskOnly
     ? satellites.filter((s) => s.risk_tier === 'High' || s.risk_tier === 'Medium')
     : satellites;
+
+  const displayPosById = useMemo(() => {
+    const cellSize = 0.002;
+    const ringRadius = 0.028;
+    const normalLift = 0.004;
+    const groups = new Map<string, { sat: SatellitePosition; base: THREE.Vector3 }[]>();
+
+    for (const sat of visible) {
+      const p = eciToScene(sat.position_km);
+      const base = new THREE.Vector3(p[0], p[1], p[2]);
+      const key = [
+        Math.round(base.x / cellSize),
+        Math.round(base.y / cellSize),
+        Math.round(base.z / cellSize),
+      ].join('|');
+      const group = groups.get(key);
+      if (group) {
+        group.push({ sat, base });
+      } else {
+        groups.set(key, [{ sat, base }]);
+      }
+    }
+
+    const result = new Map<number, [number, number, number]>();
+    for (const group of groups.values()) {
+      if (group.length === 1) {
+        const p = group[0].base;
+        result.set(group[0].sat.norad_id, [p.x, p.y, p.z]);
+        continue;
+      }
+
+      const normal = group[0].base.clone().normalize();
+      const refAxis = Math.abs(normal.y) > 0.9
+        ? new THREE.Vector3(1, 0, 0)
+        : new THREE.Vector3(0, 1, 0);
+      const tangentA = new THREE.Vector3().crossVectors(normal, refAxis).normalize();
+      const tangentB = new THREE.Vector3().crossVectors(normal, tangentA).normalize();
+
+      group.forEach((entry, index) => {
+        const angle = (2 * Math.PI * index) / group.length;
+        const offset = tangentA
+          .clone()
+          .multiplyScalar(Math.cos(angle) * ringRadius)
+          .add(tangentB.clone().multiplyScalar(Math.sin(angle) * ringRadius))
+          .add(normal.clone().multiplyScalar(normalLift));
+        const p = entry.base.clone().add(offset);
+        result.set(entry.sat.norad_id, [p.x, p.y, p.z]);
+      });
+    }
+    return result;
+  }, [visible]);
 
   const posById = useMemo(() => {
     const map = new Map<number, THREE.Vector3>();
@@ -342,6 +394,7 @@ function Scene({
         <SatDot
           key={sat.norad_id}
           sat={sat}
+          position={displayPosById.get(sat.norad_id) ?? eciToScene(sat.position_km)}
           selected={selectedId === sat.norad_id}
           onClick={() => onSelect(selectedId === sat.norad_id ? null : sat.norad_id)}
         />

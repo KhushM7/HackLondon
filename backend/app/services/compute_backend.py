@@ -28,6 +28,15 @@ _cupy_available: bool = False
 _initialized: bool = False
 
 
+def _validate_gpu_runtime(cupy: Any) -> None:
+    """Run a tiny CuPy kernel to ensure NVRTC/CUDA runtime is fully usable."""
+    probe = cupy.asarray([1.0, 2.0], dtype=cupy.float32)
+    # Elementwise subtraction forces kernel compilation and catches missing NVRTC.
+    total = cupy.sum(probe - 1.0)
+    _ = float(total.item())
+    cupy.cuda.Stream.null.synchronize()
+
+
 def _init_backend() -> None:
     """Initialize the compute backend (called once on first use)."""
     global _backend, _cupy_available, _initialized
@@ -39,8 +48,9 @@ def _init_backend() -> None:
 
     if requested == "gpu":
         try:
-            import cupy  # noqa: F401
+            import cupy
             cupy.cuda.Device(0).compute_capability  # verify CUDA device exists
+            _validate_gpu_runtime(cupy)
             _cupy_available = True
             _backend = "gpu"
             logger.info("OrbitGuard compute backend: GPU (CuPy %s)", cupy.__version__)
@@ -51,9 +61,13 @@ def _init_backend() -> None:
             )
             _backend = "cpu"
         except Exception as exc:
+            hint = ""
+            if "nvrtc" in str(exc).lower():
+                hint = " Ensure CUDA toolkit runtime is installed and CUDA_PATH points to it."
             logger.warning(
-                "ORBITGUARD_BACKEND=gpu but CUDA device unavailable (%s); falling back to CPU",
+                "ORBITGUARD_BACKEND=gpu but CUDA runtime unavailable (%s); falling back to CPU.%s",
                 exc,
+                hint,
             )
             _backend = "cpu"
     else:

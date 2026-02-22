@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from time import perf_counter
 from time import sleep
 
 import numpy as np
 from sqlalchemy import and_, delete, select
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from ..models import ConjunctionEvent, TLERecord
 from .bplane_analysis import compute_bplane
@@ -26,14 +27,44 @@ class ScreeningEngine:
         self.propagate_engine = propagate_engine
 
     def find_conjunctions(self, defended_norad_id: int, days: int = 3) -> list[ConjunctionEvent]:
+        started_at = perf_counter()
+        logger.info(
+            "Screening start: defended_norad_id=%s days=%s",
+            defended_norad_id,
+            days,
+        )
         defended = self.db.execute(
-            select(TLERecord).where(TLERecord.norad_id == defended_norad_id)
+            select(TLERecord)
+            .options(
+                load_only(
+                    TLERecord.norad_id,
+                    TLERecord.line1,
+                    TLERecord.line2,
+                    TLERecord.inclination_deg,
+                    TLERecord.mean_motion,
+                    TLERecord.updated_at,
+                    TLERecord.bstar,
+                )
+            )
+            .where(TLERecord.norad_id == defended_norad_id)
         ).scalar_one_or_none()
         if defended is None:
+            logger.warning("Screening aborted: defended asset %s not found", defended_norad_id)
             return []
 
+        query_started = perf_counter()
         candidates = self.db.execute(
-            select(TLERecord).where(
+            select(TLERecord)
+            .options(
+                load_only(
+                    TLERecord.norad_id,
+                    TLERecord.line1,
+                    TLERecord.line2,
+                    TLERecord.updated_at,
+                    TLERecord.bstar,
+                )
+            )
+            .where(
                 and_(
                     TLERecord.norad_id != defended_norad_id,
                     TLERecord.inclination_deg.between(
@@ -45,13 +76,27 @@ class ScreeningEngine:
                 )
             )
         ).scalars().all()
+        logger.info(
+            "Screening candidates loaded: defended_norad_id=%s candidates=%s query_ms=%.1f",
+            defended_norad_id,
+            len(candidates),
+            (perf_counter() - query_started) * 1000.0,
+        )
 
+        propagate_started = perf_counter()
         start = datetime.utcnow()
         pre = self.propagate_engine.propagate(defended.line1, defended.line2, start=start)
+        logger.info(
+            "Screening defended propagation complete: defended_norad_id=%s samples=%s elapsed_ms=%.1f",
+            defended_norad_id,
+            len(pre),
+            (perf_counter() - propagate_started) * 1000.0,
+        )
 
         created: list[ConjunctionEvent] = []
         cutoff = start + timedelta(days=days)
-        for candidate in candidates:
+        progress_stride = max(1, len(candidates) // 10)
+        for idx, candidate in enumerate(candidates, start=1):
             intr = self.propagate_engine.propagate(candidate.line1, candidate.line2, start=start)
             event = self._closest_approach(
                 defended_norad_id, candidate.norad_id,
@@ -60,11 +105,29 @@ class ScreeningEngine:
             )
             if event:
                 created.append(event)
+            if idx == 1 or idx == len(candidates) or idx % progress_stride == 0:
+                logger.info(
+                    "Screening progress: defended_norad_id=%s processed=%s/%s hits=%s elapsed_s=%.1f",
+                    defended_norad_id,
+                    idx,
+                    len(candidates),
+                    len(created),
+                    perf_counter() - started_at,
+                )
 
+        write_started = perf_counter()
         self._replace_events_for_asset(defended_norad_id, created)
-        for item in created:
-            self.db.refresh(item)
-        return created
+        stored_events = self.db.execute(
+            select(ConjunctionEvent).where(ConjunctionEvent.defended_norad_id == defended_norad_id)
+        ).scalars().all()
+        logger.info(
+            "Screening complete: defended_norad_id=%s events=%s total_s=%.1f write_ms=%.1f",
+            defended_norad_id,
+            len(stored_events),
+            perf_counter() - started_at,
+            (perf_counter() - write_started) * 1000.0,
+        )
+        return stored_events
 
     def _replace_events_for_asset(self, defended_norad_id: int, events: list[ConjunctionEvent]) -> None:
         attempts = 3

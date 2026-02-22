@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta
+import logging
+from threading import Lock
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -38,6 +41,19 @@ from .services.screening_engine import ScreeningEngine
 from .services.tle_validator import validate_tle
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+_screening_locks_guard = Lock()
+_screening_locks: dict[tuple[int, int], Lock] = {}
+
+
+def _get_screening_lock(norad_id: int, days: int) -> Lock:
+    key = (norad_id, days)
+    with _screening_locks_guard:
+        lock = _screening_locks.get(key)
+        if lock is None:
+            lock = Lock()
+            _screening_locks[key] = lock
+        return lock
 
 
 def _name_map_for_events(db: Session, events: list[ConjunctionEvent]) -> dict[int, str]:
@@ -51,6 +67,21 @@ def _name_map_for_events(db: Session, events: list[ConjunctionEvent]) -> dict[in
         select(TLERecord.norad_id, TLERecord.name).where(TLERecord.norad_id.in_(ids))
     ).all()
     return {norad_id: name for norad_id, name in rows}
+
+
+def _asset_events_in_window(db: Session, norad_id: int, days: int) -> list[ConjunctionEvent]:
+    now = datetime.utcnow()
+    window_end = now + timedelta(days=days)
+    return db.execute(
+        select(ConjunctionEvent).where(
+            or_(
+                ConjunctionEvent.defended_norad_id == norad_id,
+                ConjunctionEvent.intruder_norad_id == norad_id,
+            ),
+            ConjunctionEvent.tca_utc >= now,
+            ConjunctionEvent.tca_utc <= window_end,
+        )
+    ).scalars().all()
 
 
 def _conjunction_summary(event: ConjunctionEvent, name_map: dict[int, str]) -> dict:
@@ -217,15 +248,69 @@ async def refresh_ingest(db: Session = Depends(get_session)):
 def asset_conjunctions(
     norad_id: int,
     days: int = Query(default=3, ge=1, le=settings.propagation_horizon_days),
+    refresh: bool = Query(default=False),
     db: Session = Depends(get_session),
 ):
-    engine = ScreeningEngine(
-        db,
-        PropagateEngine(settings.propagation_horizon_days, settings.propagation_resolution_seconds),
-    )
-    results = engine.find_conjunctions(norad_id, days=days)
-    ordered = sorted(results, key=lambda x: x.miss_distance_km)
+    request_started = perf_counter()
+    logger.info("API /assets/%s/conjunctions started (days=%s refresh=%s)", norad_id, days, refresh)
+
+    if not refresh:
+        cached = _asset_events_in_window(db, norad_id, days)
+        if cached:
+            ordered = sorted(cached, key=lambda x: x.miss_distance_km)
+            name_map = _name_map_for_events(db, ordered)
+            logger.info(
+                "API /assets/%s/conjunctions cache hit: events=%s elapsed_s=%.1f",
+                norad_id,
+                len(ordered),
+                perf_counter() - request_started,
+            )
+            return [_conjunction_summary(event, name_map) for event in ordered]
+
+    lock = _get_screening_lock(norad_id, days)
+    acquired = lock.acquire(blocking=False)
+
+    if acquired:
+        try:
+            engine = ScreeningEngine(
+                db,
+                # Use requested window directly to avoid unnecessary propagation work.
+                PropagateEngine(days, settings.propagation_resolution_seconds),
+            )
+            results = engine.find_conjunctions(norad_id, days=days)
+            ordered = sorted(results, key=lambda x: x.miss_distance_km)
+        finally:
+            lock.release()
+    else:
+        wait_started = perf_counter()
+        logger.info(
+            "API /assets/%s/conjunctions waiting for in-flight screening (days=%s)",
+            norad_id,
+            days,
+        )
+        lock.acquire()
+        lock.release()
+        logger.info(
+            "API /assets/%s/conjunctions joined in-flight screening after %.1fs",
+            norad_id,
+            perf_counter() - wait_started,
+        )
+        ordered = sorted(
+            db.execute(
+                select(ConjunctionEvent).where(ConjunctionEvent.defended_norad_id == norad_id)
+            ).scalars().all(),
+            key=lambda x: x.miss_distance_km,
+        )
+
+    # Return the same role-agnostic view as the cache path.
+    ordered = sorted(_asset_events_in_window(db, norad_id, days), key=lambda x: x.miss_distance_km)
     name_map = _name_map_for_events(db, ordered)
+    logger.info(
+        "API /assets/%s/conjunctions finished: events=%s elapsed_s=%.1f",
+        norad_id,
+        len(ordered),
+        perf_counter() - request_started,
+    )
     return [_conjunction_summary(event, name_map) for event in ordered]
 
 
@@ -353,6 +438,7 @@ def list_custom_satellites(db: Session = Depends(get_session)):
 @router.post("/catalog/custom-satellite", response_model=CustomSatelliteResponse, status_code=201)
 def add_custom_satellite(payload: CustomSatelliteRequest, db: Session = Depends(get_session)):
     """Add a fully synthetic satellite from user-provided TLE. No external API calls."""
+    endpoint_started = perf_counter()
     line1 = payload.tle_line1.strip()
     line2 = payload.tle_line2.strip()
     sat_name = payload.name.strip()
@@ -414,12 +500,20 @@ def add_custom_satellite(payload: CustomSatelliteRequest, db: Session = Depends(
             raise HTTPException(status_code=409, detail=f"Satellite with name '{sat_name}' already exists")
         raise HTTPException(status_code=500, detail="Database error while storing satellite")
 
+    logger.info("API /catalog/custom-satellite started: name=%s", sat_name)
+    screening_started = perf_counter()
     # Run conjunction screening
     engine = ScreeningEngine(
         db,
         PropagateEngine(settings.propagation_horizon_days, settings.propagation_resolution_seconds),
     )
     conjunctions = engine.find_conjunctions(new_norad_id, days=settings.propagation_horizon_days)
+    logger.info(
+        "API /catalog/custom-satellite screening finished: norad_id=%s events=%s elapsed_s=%.1f",
+        new_norad_id,
+        len(conjunctions),
+        perf_counter() - screening_started,
+    )
 
     sat_item = CustomSatelliteItem(
         norad_id=record.norad_id,
@@ -451,11 +545,17 @@ def add_custom_satellite(payload: CustomSatelliteRequest, db: Session = Depends(
         for e in conjunctions
     ]
 
-    return CustomSatelliteResponse(
+    response = CustomSatelliteResponse(
         satellite=sat_item,
         conjunctions_found=len(conjunctions),
         events=event_summaries,
     )
+    logger.info(
+        "API /catalog/custom-satellite finished: norad_id=%s total_elapsed_s=%.1f",
+        new_norad_id,
+        perf_counter() - endpoint_started,
+    )
+    return response
 
 
 @router.delete("/catalog/custom-satellite/{norad_id}", status_code=200)

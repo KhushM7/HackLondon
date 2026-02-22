@@ -2,16 +2,18 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="Frontend changes to custom satellite">
-      <change afterPath="$PROJECT_DIR$/backend/app/services/tle_validator.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/backend/migrate_custom_satellite.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/backend/tests/test_custom_satellite.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/dataSources.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/dataSources.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/app/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/api.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/schemas.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/schemas.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/services/compute_backend.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/compute_backend.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/app/services/ingest_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/ingest_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/services/screening_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/screening_engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/orbitguard.db" beforeDir="false" afterPath="$PROJECT_DIR$/backend/orbitguard.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/components/GlobeView.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/components/GlobeView.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/lib/api.ts" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/lib/api.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/next.config.js" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/next.config.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/tsconfig.json" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/tsconfig.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/tsconfig.tsbuildinfo" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/tsconfig.tsbuildinfo" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -55,7 +57,7 @@
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "ai.playground.ignore.import.keys.banner.in.settings": "true",
-    "git-widget-placeholder": "main",
+    "git-widget-placeholder": "working",
     "nodejs_package_manager_path": "npm",
     "settings.editor.selected.configurable": "configurable.group.python.group.settings",
     "ts.external.directory.path": "C:\\Users\\khush\\OneDrive\\Coding\\Python\\Python Projects\\HackLondon\\frontend\\node_modules\\typescript\\lib",
