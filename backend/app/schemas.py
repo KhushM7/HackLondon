@@ -127,3 +127,60 @@ class CatalogPosition(BaseModel):
 
 class AddSatelliteRequest(BaseModel):
     norad_id: int = Field(ge=1)
+
+
+class CustomSatelliteRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=256)
+    tle_line1: str = Field(alias="line1")
+    tle_line2: str = Field(alias="line2")
+    mass_kg: float | None = None
+    drag_area_m2: float | None = None
+    radar_cross_section_m2: float | None = None
+    is_synthetic: bool = True
+
+    model_config = {"populate_by_name": True}
+
+
+class CustomSatelliteItem(BaseModel):
+    norad_id: int
+    name: str
+    inclination_deg: float
+    mean_motion: float
+    eccentricity: float | None = None
+    raan_deg: float | None = None
+    arg_perigee_deg: float | None = None
+    bstar: float | None = None
+    epoch: datetime | None = None
+    source: str | None = None
+    is_synthetic: bool | None = None
+    mass_kg: float | None = None
+    drag_area_m2: float | None = None
+    radar_cross_section_m2: float | None = None
+    created_at: datetime | None = None
+    updated_at: datetime
+
+
+class ConjunctionSummary(BaseModel):
+    id: int
+    intruder_norad_id: int
+    tca_utc: datetime
+    miss_distance_km: float
+    risk_tier: str
+
+
+class CustomSatelliteResponse(BaseModel):
+    satellite: CustomSatelliteItem
+    conjunctions_found: int
+    events: list[ConjunctionSummary]
+
+
+class CustomSatelliteListItem(BaseModel):
+    norad_id: int
+    name: str
+    inclination_deg: float
+    mean_motion: float
+    source: str | None = None
+    is_synthetic: bool | None = None
+    created_at: datetime | None = None
+    updated_at: datetime
+    conjunction_count: int = 0

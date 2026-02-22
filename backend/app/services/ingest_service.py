@@ -11,6 +11,12 @@ from ..config import settings
 from ..models import TLERecord
 
 
+class TLESourceError(Exception):
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class IngestService:
     def __init__(self, db: Session):
         self.db = db
@@ -23,10 +29,16 @@ class IngestService:
         return len(records)
 
     async def _download_tle_text(self) -> str:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(settings.tle_source_url)
-            response.raise_for_status()
-            return response.text
+        try:
+            async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "OrbitGuard/1.0"}) as client:
+                response = await client.get(settings.tle_source_url)
+                response.raise_for_status()
+                return response.text
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            raise TLESourceError(f"TLE source responded with HTTP {status}", status_code=status) from exc
+        except httpx.RequestError as exc:
+            raise TLESourceError(f"TLE source request failed: {exc}") from exc
 
     def _parse_tle_text(self, text: str) -> list[dict]:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -76,10 +88,16 @@ class IngestService:
 
     async def ingest_satellite_by_norad_id(self, norad_id: int) -> TLERecord:
         url = f"https://celestrak.org/NORAD/elements/gp.php?CATNR={norad_id}&FORMAT=tle"
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            text = response.text.strip()
+        try:
+            async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "OrbitGuard/1.0"}) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                text = response.text.strip()
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            raise TLESourceError(f"TLE source responded with HTTP {status}", status_code=status) from exc
+        except httpx.RequestError as exc:
+            raise TLESourceError(f"TLE source request failed: {exc}") from exc
 
         if not text or "No GP data found" in text:
             raise ValueError(f"No TLE data found for NORAD ID {norad_id} on CelesTrak")

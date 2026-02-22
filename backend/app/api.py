@@ -15,8 +15,13 @@ from .schemas import (
     CatalogPosition,
     ConjunctionDetail,
     ConjunctionResponse,
+    ConjunctionSummary,
     CongestionBand,
     CongestionResponse,
+    CustomSatelliteItem,
+    CustomSatelliteListItem,
+    CustomSatelliteRequest,
+    CustomSatelliteResponse,
     OptimizeManeuverRequest,
     OptimizeManeuverResponse,
     TradeStudyEntry,
@@ -24,9 +29,10 @@ from .schemas import (
 )
 from .services.avoidance_simulator import AvoidanceSimulator
 from .services.congestion_analyser import CongestionAnalyser
-from .services.ingest_service import IngestService
+from .services.ingest_service import IngestService, TLESourceError
 from .services.propagate_engine import PropagateEngine
 from .services.screening_engine import ScreeningEngine
+from .services.tle_validator import validate_tle
 
 router = APIRouter()
 
@@ -40,8 +46,13 @@ def catalog(limit: int = Query(default=200, ge=1, le=5000), db: Session = Depend
 @router.post("/ingest/refresh")
 async def refresh_ingest(db: Session = Depends(get_session)):
     service = IngestService(db)
-    count = await service.ingest_latest_tles()
-    return {"ingested": count, "timestamp": datetime.utcnow()}
+    try:
+        count = await service.ingest_latest_tles()
+        return {"ingested": count, "timestamp": datetime.utcnow()}
+    except TLESourceError as exc:
+        raise HTTPException(status_code=502, detail=f"Ingestion upstream error: {exc}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Ingestion failed")
 
 
 @router.get("/assets/{norad_id}/conjunctions", response_model=list[ConjunctionResponse])
@@ -136,11 +147,181 @@ async def add_satellite(payload: AddSatelliteRequest, db: Session = Depends(get_
     service = IngestService(db)
     try:
         record = await service.ingest_satellite_by_norad_id(payload.norad_id)
+    except TLESourceError as exc:
+        raise HTTPException(status_code=502, detail=f"CelesTrak fetch failed: {exc}")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"CelesTrak fetch failed: {exc}")
     return record
+
+
+@router.get("/catalog/custom-satellites", response_model=list[CustomSatelliteListItem])
+def list_custom_satellites(db: Session = Depends(get_session)):
+    """List all synthetic/custom satellites with conjunction event counts."""
+    from sqlalchemy import func
+
+    records = db.execute(
+        select(TLERecord).where(TLERecord.is_synthetic == True)  # noqa: E712
+    ).scalars().all()
+
+    result = []
+    for rec in records:
+        count = db.execute(
+            select(func.count()).where(
+                (ConjunctionEvent.defended_norad_id == rec.norad_id)
+                | (ConjunctionEvent.intruder_norad_id == rec.norad_id)
+            )
+        ).scalar() or 0
+        result.append(
+            CustomSatelliteListItem(
+                norad_id=rec.norad_id,
+                name=rec.name,
+                inclination_deg=rec.inclination_deg,
+                mean_motion=rec.mean_motion,
+                source=rec.source,
+                is_synthetic=rec.is_synthetic,
+                created_at=rec.created_at,
+                updated_at=rec.updated_at,
+                conjunction_count=count,
+            )
+        )
+    return result
+
+
+@router.post("/catalog/custom-satellite", response_model=CustomSatelliteResponse, status_code=201)
+def add_custom_satellite(payload: CustomSatelliteRequest, db: Session = Depends(get_session)):
+    """Add a fully synthetic satellite from user-provided TLE. No external API calls."""
+    line1 = payload.tle_line1.strip()
+    line2 = payload.tle_line2.strip()
+    sat_name = payload.name.strip()
+
+    from sqlalchemy import func
+    # Check duplicate name first to fail fast.
+    existing_name = db.execute(
+        select(TLERecord).where(func.lower(TLERecord.name) == sat_name.lower())
+    ).scalar_one_or_none()
+    if existing_name is not None:
+        raise HTTPException(status_code=409, detail=f"Satellite with name '{sat_name}' already exists")
+
+    # Validate TLE (checksums auto-corrected for hand-crafted TLEs)
+    result = validate_tle(line1, line2)
+    if not result.valid:
+        raise HTTPException(status_code=422, detail={"tle_errors": result.errors})
+
+    # Use checksum-corrected lines
+    line1 = result.line1
+    line2 = result.line2
+
+    # Generate synthetic NORAD ID in 90000-99999 range
+    max_id = db.execute(
+        select(func.max(TLERecord.norad_id)).where(TLERecord.norad_id >= 90000, TLERecord.norad_id <= 99999)
+    ).scalar()
+    new_norad_id = (max_id + 1) if max_id is not None else 90000
+    if new_norad_id > 99999:
+        raise HTTPException(status_code=507, detail="Synthetic NORAD ID space exhausted (90000-99999)")
+
+    now = datetime.utcnow()
+    record = TLERecord(
+        norad_id=new_norad_id,
+        name=sat_name,
+        line1=line1,
+        line2=line2,
+        inclination_deg=result.inclination_deg,
+        mean_motion=result.mean_motion,
+        eccentricity=result.eccentricity,
+        raan_deg=result.raan_deg,
+        arg_perigee_deg=result.arg_perigee_deg,
+        bstar=result.bstar,
+        epoch=result.epoch,
+        source="custom",
+        is_synthetic=True,
+        mass_kg=payload.mass_kg,
+        drag_area_m2=payload.drag_area_m2,
+        radar_cross_section_m2=payload.radar_cross_section_m2,
+        created_at=now,
+        updated_at=now,
+    )
+
+    try:
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+    except Exception as exc:
+        db.rollback()
+        if "UNIQUE" in str(exc).upper():
+            raise HTTPException(status_code=409, detail=f"Satellite with name '{sat_name}' already exists")
+        raise HTTPException(status_code=500, detail="Database error while storing satellite")
+
+    # Run conjunction screening
+    engine = ScreeningEngine(
+        db,
+        PropagateEngine(settings.propagation_horizon_days, settings.propagation_resolution_seconds),
+    )
+    conjunctions = engine.find_conjunctions(new_norad_id, days=settings.propagation_horizon_days)
+
+    sat_item = CustomSatelliteItem(
+        norad_id=record.norad_id,
+        name=record.name,
+        inclination_deg=record.inclination_deg,
+        mean_motion=record.mean_motion,
+        eccentricity=record.eccentricity,
+        raan_deg=record.raan_deg,
+        arg_perigee_deg=record.arg_perigee_deg,
+        bstar=record.bstar,
+        epoch=record.epoch,
+        source=record.source,
+        is_synthetic=record.is_synthetic,
+        mass_kg=record.mass_kg,
+        drag_area_m2=record.drag_area_m2,
+        radar_cross_section_m2=record.radar_cross_section_m2,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+    event_summaries = [
+        ConjunctionSummary(
+            id=e.id,
+            intruder_norad_id=e.intruder_norad_id,
+            tca_utc=e.tca_utc,
+            miss_distance_km=e.miss_distance_km,
+            risk_tier=e.risk_tier,
+        )
+        for e in conjunctions
+    ]
+
+    return CustomSatelliteResponse(
+        satellite=sat_item,
+        conjunctions_found=len(conjunctions),
+        events=event_summaries,
+    )
+
+
+@router.delete("/catalog/custom-satellite/{norad_id}", status_code=200)
+def delete_custom_satellite(norad_id: int, db: Session = Depends(get_session)):
+    """Delete a synthetic satellite and cascade-delete its conjunction events."""
+    from sqlalchemy import delete as sa_delete, or_
+
+    record = db.execute(
+        select(TLERecord).where(TLERecord.norad_id == norad_id)
+    ).scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Satellite with NORAD ID {norad_id} not found")
+    if not record.is_synthetic:
+        raise HTTPException(status_code=403, detail="Cannot delete real catalog objects via this endpoint")
+
+    # Cascade delete conjunction events
+    db.execute(
+        sa_delete(ConjunctionEvent).where(
+            or_(
+                ConjunctionEvent.defended_norad_id == norad_id,
+                ConjunctionEvent.intruder_norad_id == norad_id,
+            )
+        )
+    )
+    db.delete(record)
+    db.commit()
+    return {"detail": f"Satellite {norad_id} and associated conjunction events deleted"}
 
 
 @router.get("/catalog/positions", response_model=list[CatalogPosition])

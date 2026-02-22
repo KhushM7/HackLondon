@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -8,7 +8,9 @@ from .db import Base
 
 class TLERecord(Base):
     __tablename__ = "tle_records"
-    __table_args__ = (UniqueConstraint("norad_id", name="uq_tle_norad"),)
+    __table_args__ = (
+        UniqueConstraint("norad_id", name="uq_tle_norad"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     norad_id: Mapped[int] = mapped_column(Integer, index=True)
@@ -18,6 +20,19 @@ class TLERecord(Base):
     inclination_deg: Mapped[float] = mapped_column(Float)
     mean_motion: Mapped[float] = mapped_column(Float)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Custom satellite fields
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True, default="celestrak")
+    is_synthetic: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    eccentricity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    raan_deg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arg_perigee_deg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bstar: Mapped[float | None] = mapped_column(Float, nullable=True)
+    epoch: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    mass_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    drag_area_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    radar_cross_section_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)
 
 
 class ConjunctionEvent(Base):
