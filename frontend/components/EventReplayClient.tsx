@@ -10,6 +10,7 @@ export function EventReplayClient({ initialEvent }: { initialEvent: ConjunctionD
   const [deltaV, setDeltaV] = useState(0.2);
   const [loading, setLoading] = useState(false);
   const [showPost, setShowPost] = useState(false);
+  const [showBoth, setShowBoth] = useState(false);
   const [simStats, setSimStats] = useState<{ updated_miss_distance_km: number; delta_km: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +22,7 @@ export function EventReplayClient({ initialEvent }: { initialEvent: ConjunctionD
       setEvent(refreshed);
       setSimStats(result);
       setShowPost(true);
+      setShowBoth(true);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Avoidance simulation failed.');
@@ -30,10 +32,26 @@ export function EventReplayClient({ initialEvent }: { initialEvent: ConjunctionD
   }
 
   const defendedPath = showPost && event.post_trajectory ? event.post_trajectory : event.pre_trajectory;
+  const hasPostTrajectory = !!event.post_trajectory;
 
   return (
     <div className="grid" style={{ gap: 12 }}>
-      <ConjunctionScene defended={defendedPath} intruder={event.intruder_trajectory} />
+      {/* Scene: show current path, and optionally overlay both */}
+      <div style={{ position: 'relative' }}>
+        <ConjunctionScene defended={defendedPath} intruder={event.intruder_trajectory} />
+        {showBoth && hasPostTrajectory && (
+          <div style={{
+            position: 'absolute', bottom: 12, left: 12,
+            background: 'rgba(0,0,0,0.75)', borderRadius: 6, padding: '8px 14px',
+            fontSize: 13, lineHeight: 1.6,
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Trajectory Legend</div>
+            <div><span style={{ display: 'inline-block', width: 16, height: 3, background: '#4fc3f7', marginRight: 8, verticalAlign: 'middle' }} />Current path</div>
+            <div><span style={{ display: 'inline-block', width: 16, height: 3, background: '#66bb6a', marginRight: 8, verticalAlign: 'middle' }} />Diverted path (post-maneuver)</div>
+            <div><span style={{ display: 'inline-block', width: 16, height: 3, background: '#ef5350', marginRight: 8, verticalAlign: 'middle' }} />Intruder</div>
+          </div>
+        )}
+      </div>
 
       <div className="panel">
         <h3>Avoidance Simulation</h3>
@@ -57,10 +75,20 @@ export function EventReplayClient({ initialEvent }: { initialEvent: ConjunctionD
               type="checkbox"
               checked={showPost}
               onChange={(e) => setShowPost(e.target.checked)}
-              disabled={!event.post_trajectory}
+              disabled={!hasPostTrajectory}
               style={{ marginRight: 6 }}
             />
             Show post-manoeuvre path
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={showBoth}
+              onChange={(e) => setShowBoth(e.target.checked)}
+              disabled={!hasPostTrajectory}
+              style={{ marginRight: 6 }}
+            />
+            Overlay both paths
           </label>
         </div>
         {simStats ? (

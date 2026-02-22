@@ -129,6 +129,7 @@ export type ConjunctionLink = {
   defended_norad_id: number;
   intruder_norad_id: number;
   risk_tier: 'High' | 'Medium' | 'Low';
+  miss_distance_km: number;
 };
 
 export type CatalogPositionsResponse = {
@@ -195,4 +196,53 @@ export async function addCustomSatellite(payload: {
 
   customSatelliteInFlight.set(key, request);
   return request;
+}
+
+// --- Avoidance optimization ---
+
+export type AvoidancePlan = {
+  id: number;
+  asset_norad_id: number;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  event_id?: number | null;
+  burn_direction?: string | null;
+  burn_dv_mps?: number | null;
+  burn_rtn_vector?: number[] | null;
+  burn_epoch?: string | null;
+  pre_miss_distance_km?: number | null;
+  post_miss_distance_km?: number | null;
+  pre_pc?: number | null;
+  post_pc?: number | null;
+  fuel_cost_kg?: number | null;
+  current_path?: ({ t: string; position_km: [number, number, number] } | { t: string; lat_lon_alt: [number, number, number] })[] | null;
+  deviated_path?: ({ t: string; position_km: [number, number, number] } | { t: string; lat_lon_alt: [number, number, number] })[] | null;
+  candidates_evaluated?: number | null;
+  optimization_elapsed_s?: number | null;
+  progress_stage?: string | null;
+  progress_done?: number | null;
+  progress_total?: number | null;
+  progress_message?: string | null;
+  heartbeat_at?: string | null;
+  error_message?: string | null;
+  created_at: string;
+  completed_at?: string | null;
+};
+
+export async function optimizeAvoidance(
+  noradId: number,
+  opts?: { max_delta_v_mps?: number; burn_window_hours?: number; top_n_events?: number }
+): Promise<AvoidancePlan> {
+  return requestJson<AvoidancePlan>(`/assets/${noradId}/avoidance/optimize`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      max_delta_v_mps: opts?.max_delta_v_mps ?? 5.0,
+      burn_window_hours: opts?.burn_window_hours ?? 48.0,
+      top_n_events: opts?.top_n_events ?? 3,
+    }),
+  });
+}
+
+export async function getAvoidancePlan(noradId: number): Promise<AvoidancePlan> {
+  return requestJson<AvoidancePlan>(`/assets/${noradId}/avoidance/plan`);
 }

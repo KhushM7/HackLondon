@@ -16,6 +16,7 @@ class ConjunctionLink(BaseModel):
     defended_norad_id: int
     intruder_norad_id: int
     risk_tier: str
+    miss_distance_km: float
 
 
 class ConjunctionResponse(BaseModel):
@@ -204,3 +205,39 @@ class CustomSatelliteListItem(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime
     conjunction_count: int = 0
+
+
+class OptimizeAvoidanceRequest(BaseModel):
+    max_delta_v_mps: float = Field(default=5.0, ge=0.01, le=50.0, description="Maximum delta-v budget (m/s)")
+    burn_window_hours: float = Field(default=48.0, ge=1.0, le=168.0, description="Allowed burn window before TCA (hours)")
+    weight_miss_distance: float = Field(default=1.0, ge=0.0, le=10.0, description="Objective weight for miss distance maximization")
+    weight_delta_v: float = Field(default=0.3, ge=0.0, le=10.0, description="Objective weight for delta-v minimization")
+    top_n_events: int = Field(default=3, ge=1, le=20, description="Number of top-risk events to optimize against")
+
+
+class AvoidancePlanSummary(BaseModel):
+    id: int
+    asset_norad_id: int
+    status: str
+    event_id: int | None = None
+    burn_direction: str | None = None
+    burn_dv_mps: float | None = None
+    burn_rtn_vector: list[float] | None = None
+    burn_epoch: datetime | None = None
+    pre_miss_distance_km: float | None = None
+    post_miss_distance_km: float | None = None
+    pre_pc: float | None = None
+    post_pc: float | None = None
+    fuel_cost_kg: float | None = None
+    current_path: list[dict] | None = None
+    deviated_path: list[dict] | None = None
+    candidates_evaluated: int | None = None
+    optimization_elapsed_s: float | None = None
+    progress_stage: str | None = None
+    progress_done: int | None = None
+    progress_total: int | None = None
+    progress_message: str | None = None
+    heartbeat_at: datetime | None = None
+    error_message: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None

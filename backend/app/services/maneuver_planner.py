@@ -196,6 +196,10 @@ def simulate_maneuver(
     cov_secondary: Optional[CovarianceInfo] = None,
     hard_body_radius_km: float = DEFAULT_HBR_KM,
     mass_kg: float = 500.0,
+    pre_pc_override: Optional[float] = None,
+    propagation_step_seconds: float = 60.0,
+    post_tca_pad_hours: float = 24.0,
+    store_post_trajectory: bool = True,
 ) -> ManeuverResult:
     """Simulate a collision avoidance maneuver and compute post-maneuver Pc.
 
@@ -228,11 +232,13 @@ def simulate_maneuver(
     dv_rtn = BURN_DIRECTIONS[direction] * delta_v_mps
 
     # Apply burn and get post-burn trajectory
-    propagation_hours = burn_lead_time_hours + 48.0
+    # Only needs to span burn->TCA plus a post-TCA tail.
+    propagation_hours = burn_lead_time_hours + max(1.0, post_tca_pad_hours)
     post_traj = apply_impulsive_burn_sgp4(
         line1_primary, line2_primary,
         burn_epoch, dv_rtn,
         propagation_duration_hours=propagation_hours,
+        step_seconds=propagation_step_seconds,
     )
 
     # Propagate secondary to find new TCA
@@ -284,16 +290,19 @@ def simulate_maneuver(
         pc_result = compute_pc_foster(miss_bp, cov_bp, hard_body_radius_km)
         post_pc = pc_result.pc
 
-    # Pre-maneuver Pc
-    pre_bplane = compute_bplane(tca)
-    cov_p = cov_primary or default_covariance()
-    cov_s = cov_secondary or default_covariance()
-    pre_cov_bp = project_covariance_to_bplane(
-        cov_p.cov_3x3_pos, cov_s.cov_3x3_pos, pre_bplane
-    )
-    pre_miss_bp = np.array([pre_bplane.b_dot_t_km, pre_bplane.b_dot_r_km])
-    pre_pc_result = compute_pc_foster(pre_miss_bp, pre_cov_bp, hard_body_radius_km)
-    pre_pc = pre_pc_result.pc
+    if pre_pc_override is None:
+        # Pre-maneuver Pc
+        pre_bplane = compute_bplane(tca)
+        cov_p = cov_primary or default_covariance()
+        cov_s = cov_secondary or default_covariance()
+        pre_cov_bp = project_covariance_to_bplane(
+            cov_p.cov_3x3_pos, cov_s.cov_3x3_pos, pre_bplane
+        )
+        pre_miss_bp = np.array([pre_bplane.b_dot_t_km, pre_bplane.b_dot_r_km])
+        pre_pc_result = compute_pc_foster(pre_miss_bp, pre_cov_bp, hard_body_radius_km)
+        pre_pc = pre_pc_result.pc
+    else:
+        pre_pc = pre_pc_override
 
     fuel = tsiolkovsky_fuel_cost(delta_v_mps, mass_kg)
     risk = classify_risk(post_pc)
@@ -307,7 +316,7 @@ def simulate_maneuver(
         post_miss_distance_km=post_miss,
         post_tca_epoch=post_tca_epoch,
         fuel_cost_kg=fuel,
-        post_trajectory=post_traj,
+        post_trajectory=post_traj if store_post_trajectory else [],
         risk_level=risk.value,
     )
 

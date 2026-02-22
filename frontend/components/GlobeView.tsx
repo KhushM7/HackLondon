@@ -8,11 +8,23 @@ import type { ConjunctionLink, SatellitePosition } from '../lib/api';
 
 const EARTH_R_KM = 6371;
 const S = 1 / EARTH_R_KM; // scene units: Earth radius = 1.0
+const MAX_SINGLE_TRACK_POINTS = 140;
 
 // ECI TEME → Three.js (Y-up, north pole = +Y)
 // ECI: x = vernal equinox, y = 90°E equatorial, z = north pole
 function eciToScene(pos: [number, number, number]): [number, number, number] {
   return [pos[0] * S, pos[2] * S, pos[1] * S];
+}
+
+function llaToScene(latLonAlt: [number, number, number]): [number, number, number] {
+  const [latDeg, lonDeg, altKm] = latLonAlt;
+  const lat = (latDeg * Math.PI) / 180;
+  const lon = (lonDeg * Math.PI) / 180;
+  const r = (EARTH_R_KM + altKm) * S;
+  const x = r * Math.cos(lat) * Math.cos(lon);
+  const y = r * Math.cos(lat) * Math.sin(lon);
+  const z = r * Math.sin(lat);
+  return [x, z, y];
 }
 
 // Approximate sun direction in ECI (J2000-based) for real-time lighting.
@@ -40,6 +52,43 @@ function riskColor(tier: string | null | undefined): string {
 
 function velocityToScene(vec: [number, number, number]): [number, number, number] {
   return [vec[0], vec[2], vec[1]];
+}
+
+type AvoidancePathSample =
+  | { t: string; position_km: [number, number, number] }
+  | { t: string; lat_lon_alt: [number, number, number] };
+
+function avoidanceSampleToScene(sample: AvoidancePathSample): [number, number, number] {
+  if ('position_km' in sample) {
+    return eciToScene(sample.position_km);
+  }
+  return llaToScene(sample.lat_lon_alt);
+}
+
+function orderedAvoidancePoints(path: AvoidancePathSample[]): THREE.Vector3[] {
+  const rows = path
+    .map((sample) => {
+      const tMs = Date.parse(sample.t);
+      const p = avoidanceSampleToScene(sample);
+      return { tMs: Number.isFinite(tMs) ? tMs : Number.POSITIVE_INFINITY, p };
+    })
+    .filter(({ p }) => Number.isFinite(p[0]) && Number.isFinite(p[1]) && Number.isFinite(p[2]))
+    .sort((a, b) => a.tMs - b.tMs);
+
+  const points: THREE.Vector3[] = [];
+  let lastTime = Number.NaN;
+  for (const row of rows) {
+    if (row.tMs === lastTime && points.length > 0) {
+      points[points.length - 1] = new THREE.Vector3(row.p[0], row.p[1], row.p[2]);
+    } else {
+      points.push(new THREE.Vector3(row.p[0], row.p[1], row.p[2]));
+      lastTime = row.tMs;
+    }
+  }
+  if (points.length <= MAX_SINGLE_TRACK_POINTS) {
+    return points;
+  }
+  return points.slice(0, MAX_SINGLE_TRACK_POINTS);
 }
 
 function Controls() {
@@ -173,6 +222,74 @@ function OrbitTube({ points, color = '#7ad6ff', opacity = 0.6, radius = 0.01 }: 
   );
 }
 
+function OrbitLine({ points, color = '#7ad6ff', opacity = 0.7 }: { points: THREE.Vector3[]; color?: string; opacity?: number }) {
+  const geometry = useMemo(() => {
+    if (points.length < 2) return null;
+    const coords = new Float32Array(points.length * 3);
+    for (let i = 0; i < points.length; i += 1) {
+      coords[i * 3] = points[i].x;
+      coords[i * 3 + 1] = points[i].y;
+      coords[i * 3 + 2] = points[i].z;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(coords, 3));
+    geom.computeBoundingSphere();
+    return geom;
+  }, [points]);
+
+  useEffect(() => {
+    return () => {
+      geometry?.dispose();
+    };
+  }, [geometry]);
+
+  if (!geometry) return null;
+
+  return (
+    <line geometry={geometry} frustumCulled={false}>
+      <lineBasicMaterial color={color} transparent opacity={opacity} />
+    </line>
+  );
+}
+
+function OrbitTubeLinear({
+  points,
+  color = '#7ad6ff',
+  opacity = 0.9,
+  radius = 0.007,
+}: {
+  points: THREE.Vector3[];
+  color?: string;
+  opacity?: number;
+  radius?: number;
+}) {
+  const geometry = useMemo(() => {
+    if (points.length < 2) return null;
+    const path = new THREE.CurvePath<THREE.Vector3>();
+    for (let i = 0; i < points.length - 1; i += 1) {
+      path.add(new THREE.LineCurve3(points[i], points[i + 1]));
+    }
+    const tubularSegments = Math.max(32, points.length * 2);
+    const geom = new THREE.TubeGeometry(path, tubularSegments, radius, 10, false);
+    geom.computeBoundingSphere();
+    return geom;
+  }, [points, radius]);
+
+  useEffect(() => {
+    return () => {
+      geometry?.dispose();
+    };
+  }, [geometry]);
+
+  if (!geometry) return null;
+
+  return (
+    <mesh geometry={geometry} frustumCulled={false}>
+      <meshBasicMaterial color={color} transparent opacity={opacity} />
+    </mesh>
+  );
+}
+
 function SatDot({
   sat,
   position,
@@ -206,6 +323,8 @@ function Scene({
   links,
   orbitPath,
   relatedOrbits,
+  avoidanceCurrentPath,
+  avoidanceDeviatedPath,
   selectedId,
   onSelect,
   showAtRiskOnly,
@@ -214,6 +333,8 @@ function Scene({
   links: ConjunctionLink[];
   orbitPath: [number, number, number][];
   relatedOrbits: { norad_id: number; positions_km: [number, number, number][] }[];
+  avoidanceCurrentPath: AvoidancePathSample[];
+  avoidanceDeviatedPath: AvoidancePathSample[];
   selectedId: number | null;
   onSelect: (id: number | null) => void;
   showAtRiskOnly: boolean;
@@ -319,6 +440,29 @@ function Scene({
     }));
   }, [relatedOrbits]);
 
+  const avoidanceCurrentPoints = useMemo(() => {
+    return orderedAvoidancePoints(avoidanceCurrentPath);
+  }, [avoidanceCurrentPath]);
+
+  const avoidanceDeviatedPoints = useMemo(() => {
+    return orderedAvoidancePoints(avoidanceDeviatedPath);
+  }, [avoidanceDeviatedPath]);
+  const selectedTrack = useMemo(() => {
+    if (selectedId === null) {
+      return { points: [] as THREE.Vector3[], color: '#7ad6ff', opacity: 0.7 };
+    }
+    if (avoidanceDeviatedPoints.length > 1) {
+      return { points: avoidanceDeviatedPoints, color: '#66bb6a', opacity: 0.9 };
+    }
+    if (avoidanceCurrentPoints.length > 1) {
+      return { points: avoidanceCurrentPoints, color: '#4fc3f7', opacity: 0.75 };
+    }
+    if (orbitPoints.length > 1) {
+      return { points: orbitPoints, color: '#7ad6ff', opacity: 0.7 };
+    }
+    return { points: [] as THREE.Vector3[], color: '#7ad6ff', opacity: 0.7 };
+  }, [selectedId, avoidanceDeviatedPoints, avoidanceCurrentPoints, orbitPoints]);
+
   const selectedLinks = useMemo(() => {
     if (selectedId === null) return [];
     return links.filter(
@@ -367,18 +511,9 @@ function Scene({
       <Earth />
       <GridLines />
       <Atmosphere />
-      {selectedId !== null && <OrbitTube points={orbitPoints} />}
-      {selectedId !== null &&
-        relatedOrbitPoints.map((entry) => (
-          <OrbitTube key={`orbit-${entry.norad_id}`} points={entry.points} color="#b8e9ff" opacity={0.45} radius={0.007} />
-        ))}
-      {selectedId !== null &&
-        relatedArrows.map((arrow) => (
-          <arrowHelper
-            key={arrow.key}
-            args={[arrow.dir, arrow.pos, 0.09, 0xb8e9ff, 0.03, 0.015]}
-          />
-        ))}
+      {selectedId !== null && selectedTrack.points.length > 1 && (
+        <OrbitTubeLinear points={selectedTrack.points} color={selectedTrack.color} opacity={selectedTrack.opacity} radius={0.008} />
+      )}
       {arrowIds.map((id) => {
         const pos = posById.get(id);
         const vel = velById.get(id);
@@ -403,11 +538,13 @@ function Scene({
   );
 }
 
-export function GlobeView({ satellites, links, orbitPath, relatedOrbits, selectedId, onSelect, showAtRiskOnly }: {
+export function GlobeView({ satellites, links, orbitPath, relatedOrbits, avoidanceCurrentPath, avoidanceDeviatedPath, selectedId, onSelect, showAtRiskOnly }: {
   satellites: SatellitePosition[];
   links: ConjunctionLink[];
   orbitPath: [number, number, number][];
   relatedOrbits: { norad_id: number; positions_km: [number, number, number][] }[];
+  avoidanceCurrentPath: AvoidancePathSample[];
+  avoidanceDeviatedPath: AvoidancePathSample[];
   selectedId: number | null;
   onSelect: (id: number | null) => void;
   showAtRiskOnly: boolean;
@@ -420,6 +557,8 @@ export function GlobeView({ satellites, links, orbitPath, relatedOrbits, selecte
           links={links}
           orbitPath={orbitPath}
           relatedOrbits={relatedOrbits}
+          avoidanceCurrentPath={avoidanceCurrentPath}
+          avoidanceDeviatedPath={avoidanceDeviatedPath}
           selectedId={selectedId}
           onSelect={onSelect}
           showAtRiskOnly={showAtRiskOnly}

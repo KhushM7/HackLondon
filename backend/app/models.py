@@ -88,3 +88,47 @@ class ConjunctionEvent(Base):
     post_maneuver_miss_distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
     post_maneuver_fuel_cost_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     post_maneuver_trajectory: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # Maneuver confidence metadata
+    maneuver_confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    maneuver_optimizer_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+
+class AvoidancePlan(Base):
+    __tablename__ = "avoidance_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset_norad_id: Mapped[int] = mapped_column(Integer, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+
+    # Best maneuver result
+    event_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    burn_direction: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    burn_dv_mps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    burn_rtn_vector: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    burn_epoch: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Risk metrics
+    pre_miss_distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    post_miss_distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pre_pc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    post_pc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fuel_cost_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Trajectory polylines for map
+    current_path: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    deviated_path: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # Optimization metadata
+    candidates_evaluated: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    optimization_elapsed_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    progress_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    progress_done: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    progress_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    progress_message: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    optimizer_version: Mapped[str | None] = mapped_column(String(16), nullable=True, default="v1")
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

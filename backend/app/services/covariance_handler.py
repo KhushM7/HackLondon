@@ -22,6 +22,8 @@ from .bplane_analysis import BPlaneResult
 from .orbital_constants import GM_EARTH_KM3_S2
 
 logger = logging.getLogger(__name__)
+_PD_CORRECTION_WARN_COUNT = 0
+_PD_CORRECTION_WARN_LIMIT = 5
 
 
 @dataclass
@@ -131,21 +133,32 @@ def ensure_positive_definite(matrix: np.ndarray) -> tuple[np.ndarray, bool]:
 
     Reference: Higham (1988), "Computing a nearest symmetric positive semidefinite matrix"
     """
+    global _PD_CORRECTION_WARN_COUNT
+
     # Symmetrize
     sym = (matrix + matrix.T) / 2.0
 
-    try:
-        np.linalg.cholesky(sym)
+    # Fast path: avoid exception-heavy Cholesky probe in tight loops.
+    eigvals = np.linalg.eigvalsh(sym)
+    if float(np.min(eigvals)) > 0.0:
         return sym, False
-    except np.linalg.LinAlgError:
-        pass
 
     # Higham correction: eigenvalue clipping
-    logger.warning("Covariance matrix is not positive definite; applying Higham correction")
     eigvals, eigvecs = np.linalg.eigh(sym)
     eigvals_clipped = np.maximum(eigvals, 1e-10)
     corrected = eigvecs @ np.diag(eigvals_clipped) @ eigvecs.T
     corrected = (corrected + corrected.T) / 2.0  # re-symmetrize
+
+    if _PD_CORRECTION_WARN_COUNT < _PD_CORRECTION_WARN_LIMIT:
+        logger.warning(
+            "Covariance matrix is not positive definite; applying Higham correction "
+            "(%s/%s)",
+            _PD_CORRECTION_WARN_COUNT + 1,
+            _PD_CORRECTION_WARN_LIMIT,
+        )
+        if _PD_CORRECTION_WARN_COUNT + 1 == _PD_CORRECTION_WARN_LIMIT:
+            logger.warning("Further covariance PD correction warnings will be suppressed for this process")
+    _PD_CORRECTION_WARN_COUNT += 1
 
     return corrected, True
 

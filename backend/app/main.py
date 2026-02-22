@@ -8,7 +8,8 @@ from sqlalchemy import text
 from .api import router
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .services.ingest_service import IngestService
+from .schema_migrations import apply_startup_sqlite_migrations
+from .services.ingest_service import IngestService, TLESourceError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +31,9 @@ async def ingestion_loop() -> None:
         try:
             count = await IngestService(db).ingest_latest_tles()
             logger.info("Ingested %s TLE records", count)
+        except TLESourceError as exc:
+            logger.warning("Ingestion skipped: %s", exc)
+            db.rollback()
         except Exception as exc:
             logger.exception("Ingestion failed: %s", exc)
             db.rollback()
@@ -41,6 +45,7 @@ async def ingestion_loop() -> None:
 @app.on_event("startup")
 async def startup_event() -> None:
     Base.metadata.create_all(bind=engine)
+    apply_startup_sqlite_migrations(engine)
     db = SessionLocal()
     try:
         # Improves candidate filtering speed for screening queries.
@@ -48,6 +53,19 @@ async def startup_event() -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_tle_screening_inc_mean "
                 "ON tle_records (inclination_deg, mean_motion)"
+            )
+        )
+        # Narrow conjunction window queries for avoidance optimization.
+        db.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_conj_defended_tca "
+                "ON conjunction_events (defended_norad_id, tca_utc)"
+            )
+        )
+        db.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_avoidance_asset "
+                "ON avoidance_plans (asset_norad_id, created_at)"
             )
         )
         db.commit()

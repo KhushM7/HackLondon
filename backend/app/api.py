@@ -3,15 +3,16 @@ import logging
 from threading import Lock
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_session
-from .models import ConjunctionEvent, TLERecord
+from .models import AvoidancePlan, ConjunctionEvent, TLERecord
 from .schemas import (
     AddSatelliteRequest,
+    AvoidancePlanSummary,
     AvoidanceRequest,
     AvoidanceResponse,
     CatalogItem,
@@ -27,6 +28,7 @@ from .schemas import (
     CustomSatelliteListItem,
     CustomSatelliteRequest,
     CustomSatelliteResponse,
+    OptimizeAvoidanceRequest,
     OrbitPathResponse,
     OptimizeManeuverRequest,
     OptimizeManeuverResponse,
@@ -388,6 +390,166 @@ def trade_study_endpoint(event_id: int, db: Session = Depends(get_session)):
     )
 
 
+def _run_avoidance_optimization(
+    norad_id: int,
+    plan_id: int,
+    max_delta_v_mps: float,
+    burn_window_hours: float,
+    weight_miss_distance: float,
+    weight_delta_v: float,
+    top_n_events: int,
+) -> None:
+    """Background task: run avoidance optimization with its own DB session."""
+    from .db import SessionLocal
+    db = SessionLocal()
+    try:
+        simulator = AvoidanceSimulator(db)
+        simulator.run_full_optimization(
+            norad_id,
+            plan_id=plan_id,
+            max_delta_v_mps=max_delta_v_mps,
+            burn_window_hours=burn_window_hours,
+            weight_miss_distance=weight_miss_distance,
+            weight_delta_v=weight_delta_v,
+            top_n_events=top_n_events,
+        )
+    except Exception as exc:
+        logger.error("Background optimization failed for %s: %s", norad_id, exc)
+    finally:
+        db.close()
+
+
+@router.post("/assets/{norad_id}/avoidance/optimize", response_model=AvoidancePlanSummary, status_code=202)
+def start_avoidance_optimization(
+    norad_id: int,
+    payload: OptimizeAvoidanceRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_session),
+):
+    """Start async optimization for top-risk conjunctions of an asset.
+
+    Returns immediately with a plan in 'running' status. Poll GET /assets/{id}/avoidance/plan
+    for results.
+    """
+    # Verify asset exists
+    asset = db.execute(select(TLERecord).where(TLERecord.norad_id == norad_id)).scalar_one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"Asset {norad_id} not found")
+
+    # Create plan now and let background worker fill it in.
+    plan = AvoidancePlan(
+        asset_norad_id=norad_id,
+        status="running",
+        progress_stage="queued",
+        progress_done=0,
+        progress_total=None,
+        progress_message="Queued for optimization",
+        heartbeat_at=datetime.utcnow(),
+        optimizer_version="v1",
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    logger.info(
+        "API /assets/%s/avoidance/optimize queued: plan_id=%s max_dv=%.2f window_h=%.1f top_n=%s",
+        norad_id,
+        plan.id,
+        payload.max_delta_v_mps,
+        payload.burn_window_hours,
+        payload.top_n_events,
+    )
+
+    # Launch background optimization
+    background_tasks.add_task(
+        _run_avoidance_optimization,
+        norad_id,
+        plan.id,
+        payload.max_delta_v_mps,
+        payload.burn_window_hours,
+        payload.weight_miss_distance,
+        payload.weight_delta_v,
+        payload.top_n_events,
+    )
+
+    return AvoidancePlanSummary(
+        id=plan.id,
+        asset_norad_id=plan.asset_norad_id,
+        status=plan.status,
+        progress_stage=plan.progress_stage,
+        progress_done=plan.progress_done,
+        progress_total=plan.progress_total,
+        progress_message=plan.progress_message,
+        heartbeat_at=plan.heartbeat_at,
+        created_at=plan.created_at,
+    )
+
+
+@router.get("/assets/{norad_id}/avoidance/plan", response_model=AvoidancePlanSummary)
+def get_avoidance_plan(norad_id: int, db: Session = Depends(get_session)):
+    """Get the latest computed avoidance plan for an asset."""
+    plan = db.execute(
+        select(AvoidancePlan)
+        .where(AvoidancePlan.asset_norad_id == norad_id)
+        .order_by(AvoidancePlan.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"No avoidance plan found for asset {norad_id}")
+
+    return AvoidancePlanSummary(
+        id=plan.id,
+        asset_norad_id=plan.asset_norad_id,
+        status=plan.status,
+        event_id=plan.event_id,
+        burn_direction=plan.burn_direction,
+        burn_dv_mps=plan.burn_dv_mps,
+        burn_rtn_vector=plan.burn_rtn_vector,
+        burn_epoch=plan.burn_epoch,
+        pre_miss_distance_km=plan.pre_miss_distance_km,
+        post_miss_distance_km=plan.post_miss_distance_km,
+        pre_pc=plan.pre_pc,
+        post_pc=plan.post_pc,
+        fuel_cost_kg=plan.fuel_cost_kg,
+        current_path=plan.current_path,
+        deviated_path=plan.deviated_path,
+        candidates_evaluated=plan.candidates_evaluated,
+        optimization_elapsed_s=plan.optimization_elapsed_s,
+        progress_stage=plan.progress_stage,
+        progress_done=plan.progress_done,
+        progress_total=plan.progress_total,
+        progress_message=plan.progress_message,
+        heartbeat_at=plan.heartbeat_at,
+        error_message=plan.error_message,
+        created_at=plan.created_at,
+        completed_at=plan.completed_at,
+    )
+
+
+@router.post("/avoidance/cancel-all")
+def cancel_all_avoidance_plans(db: Session = Depends(get_session)):
+    """Cancel all running/pending avoidance optimizations."""
+    now = datetime.utcnow()
+    plans = db.execute(
+        select(AvoidancePlan).where(AvoidancePlan.status.in_(["pending", "running"]))
+    ).scalars().all()
+
+    for plan in plans:
+        plan.status = "cancelled"
+        plan.completed_at = now
+        plan.progress_stage = "cancelled"
+        plan.progress_done = 1
+        plan.progress_total = 1
+        plan.progress_message = "Cancelled by user"
+        plan.heartbeat_at = now
+        if not plan.error_message:
+            plan.error_message = "Cancelled by user"
+
+    db.commit()
+    logger.info("Cancelled %s avoidance plan(s)", len(plans))
+    return {"cancelled": len(plans), "timestamp": now}
+
+
 @router.post("/catalog/satellite", response_model=CatalogItem, status_code=201)
 async def add_satellite(payload: AddSatelliteRequest, db: Session = Depends(get_session)):
     service = IngestService(db)
@@ -632,6 +794,7 @@ def catalog_positions(limit: int = Query(default=500, ge=1, le=5000), db: Sessio
             defended_norad_id=event.defended_norad_id,
             intruder_norad_id=event.intruder_norad_id,
             risk_tier=event.risk_tier,
+            miss_distance_km=event.miss_distance_km,
         )
         for event in selected_events
     ]

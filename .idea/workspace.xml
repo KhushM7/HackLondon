@@ -1,18 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="Frontend changes to custom satellite">
+    <list default="true" id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="fix conjunctions screen and improve algorithm time">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/.env.example" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/app/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/services/compute_backend.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/compute_backend.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/schemas.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/schemas.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/services/avoidance_simulator.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/avoidance_simulator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/services/covariance_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/covariance_handler.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/app/services/ingest_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/ingest_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/services/screening_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/screening_engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/services/maneuver_planner.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/maneuver_planner.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/orbitguard.db" beforeDir="false" afterPath="$PROJECT_DIR$/backend/orbitguard.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/app/assets/[noradId]/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/app/assets/[noradId]/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/app/conjunctions/[eventId]/page.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/components/DashboardClient.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/components/DashboardClient.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/components/EventReplayClient.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/components/EventReplayClient.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/components/GlobeView.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/components/GlobeView.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/lib/api.ts" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/lib/api.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/next.config.js" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/next.config.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/tsconfig.json" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/tsconfig.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/tsconfig.tsbuildinfo" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/tsconfig.tsbuildinfo" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -153,7 +159,15 @@
       <option name="project" value="LOCAL" />
       <updated>1771721661919</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="fix conjunctions screen and improve algorithm time">
+      <option name="closed" value="true" />
+      <created>1771747510291</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1771747510291</updated>
+    </task>
+    <option name="localTasksCounter" value="10" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -167,7 +181,8 @@
     <MESSAGE value="Updated gitignnore" />
     <MESSAGE value="Updated gitignnore and db" />
     <MESSAGE value="Frontend changes to custom satellite" />
-    <option name="LAST_COMMIT_MESSAGE" value="Frontend changes to custom satellite" />
+    <MESSAGE value="fix conjunctions screen and improve algorithm time" />
+    <option name="LAST_COMMIT_MESSAGE" value="fix conjunctions screen and improve algorithm time" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

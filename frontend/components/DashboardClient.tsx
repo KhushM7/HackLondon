@@ -4,18 +4,24 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import {
+  AvoidancePlan,
   CatalogItem,
   Conjunction,
+  ConjunctionDetail,
   ConjunctionLink,
   SatellitePosition,
+  getAvoidancePlan,
   getCatalogPositions,
+  getConjunction,
   getCongestion,
   getConjunctions,
   getOrbitPath,
+  optimizeAvoidance,
   refreshIngest,
 } from '../lib/api';
 import { AddSatelliteModal } from './AddSatelliteModal';
 import { CongestionChart } from './CongestionChart';
+import { EventReplayClient } from './EventReplayClient';
 import { GlobeView } from './GlobeView';
 
 // ── Draggable floating window ─────────────────────────────────────────────────
@@ -120,6 +126,25 @@ function DraggableWindow({ title, children, onClose, width, initialX, initialY }
   );
 }
 
+function burnInstruction(direction?: string | null): string {
+  switch (direction) {
+    case 'prograde':
+      return 'Increase speed (prograde burn).';
+    case 'retrograde':
+      return 'Decrease speed (retrograde burn).';
+    case 'radial_plus':
+      return 'Burn outward from Earth (radial +).';
+    case 'radial_minus':
+      return 'Burn inward toward Earth (radial -).';
+    case 'normal_plus':
+      return 'Burn normal + to shift orbital plane.';
+    case 'normal_minus':
+      return 'Burn normal - to shift orbital plane.';
+    default:
+      return 'Execute the recommended burn vector.';
+  }
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export function DashboardClient() {
@@ -136,9 +161,16 @@ export function DashboardClient() {
   const [loading, setLoading] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
   const [showConjFloat, setShowConjFloat] = useState(false);
+  const [showConjDetailFloat, setShowConjDetailFloat] = useState(false);
   const [showCongFloat, setShowCongFloat] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [plan, setPlan] = useState<AvoidancePlan | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [selectedEventDetail, setSelectedEventDetail] = useState<ConjunctionDetail | null>(null);
+  const [eventDetailLoading, setEventDetailLoading] = useState(false);
+  const [eventDetailError, setEventDetailError] = useState<string | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
 
   const nameById = useMemo(() => new Map(satellites.map((s) => [s.norad_id, s.name])), [satellites]);
@@ -208,6 +240,14 @@ export function DashboardClient() {
       getOrbitPath(selectedId)
         .then((data) => setOrbitPath(data.positions_km))
         .catch(() => setOrbitPath([]));
+      getAvoidancePlan(selectedId)
+        .then((data) => {
+          setPlan(data);
+          setPlanError(null);
+        })
+        .catch(() => {
+          setPlan(null);
+        });
       const relatedIds = links
         .filter((link) => link.risk_tier === 'High' || link.risk_tier === 'Medium')
         .filter((link) => link.defended_norad_id === selectedId || link.intruder_norad_id === selectedId)
@@ -226,8 +266,27 @@ export function DashboardClient() {
       setEvents([]);
       setOrbitPath([]);
       setRelatedOrbits([]);
+      setPlan(null);
+      setPlanError(null);
     }
   }, [selectedId, links]);
+
+  useEffect(() => {
+    if (!selectedId || !plan || (plan.status !== 'pending' && plan.status !== 'running')) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      getAvoidancePlan(selectedId)
+        .then((nextPlan) => {
+          setPlan(nextPlan);
+          if (nextPlan.status === 'completed' || nextPlan.status === 'failed' || nextPlan.status === 'cancelled') {
+            window.clearInterval(interval);
+          }
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [selectedId, plan?.id, plan?.status]);
 
   async function triggerRefresh() {
     try {
@@ -265,6 +324,78 @@ export function DashboardClient() {
     }
   }
 
+  async function startOptimization() {
+    if (!selectedId) {
+      return;
+    }
+    try {
+      setPlanLoading(true);
+      setPlanError(null);
+      const created = await optimizeAvoidance(selectedId);
+      setPlan(created);
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : 'Failed to start optimization');
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
+  async function openConjunctionDetail(eventId: number) {
+    setShowConjDetailFloat(true);
+    setEventDetailLoading(true);
+    setEventDetailError(null);
+    try {
+      const detail = await getConjunction(eventId);
+      setSelectedEventDetail(detail);
+    } catch (err) {
+      setSelectedEventDetail(null);
+      setEventDetailError(err instanceof Error ? err.message : 'Failed to load conjunction event');
+    } finally {
+      setEventDetailLoading(false);
+    }
+  }
+
+  const avoidanceCurrentPath = useMemo(() => {
+    if (!selectedId || !plan || plan.asset_norad_id !== selectedId || plan.status !== 'completed') {
+      return [];
+    }
+    return plan.current_path ?? [];
+  }, [selectedId, plan]);
+
+  const avoidanceDeviatedPath = useMemo(() => {
+    if (!selectedId || !plan || plan.asset_norad_id !== selectedId || plan.status !== 'completed') {
+      return [];
+    }
+    return plan.deviated_path ?? [];
+  }, [selectedId, plan]);
+
+  const planProgressPct = useMemo(() => {
+    if (!plan || (plan.status !== 'pending' && plan.status !== 'running')) {
+      return null;
+    }
+    const done = plan.progress_done ?? null;
+    const total = plan.progress_total ?? null;
+    if (done == null || total == null || total <= 0) {
+      return null;
+    }
+    return Math.max(0, Math.min(100, (done / total) * 100));
+  }, [plan]);
+
+  const maneuverInstruction = useMemo(() => {
+    if (!plan || plan.status !== 'completed') {
+      return null;
+    }
+    const base = burnInstruction(plan.burn_direction);
+    const dv = typeof plan.burn_dv_mps === 'number' ? `${plan.burn_dv_mps.toFixed(2)} m/s` : null;
+    const burnTime = plan.burn_epoch
+      ? new Date(plan.burn_epoch).toISOString().slice(0, 16).replace('T', ' ')
+      : null;
+    const parts = [base];
+    if (dv) parts.push(`Delta-v: ${dv}.`);
+    if (burnTime) parts.push(`Burn epoch (UTC): ${burnTime}.`);
+    return parts.join(' ');
+  }, [plan]);
+
   const selectedSat = satellites.find((s) => s.norad_id === selectedId) ?? null;
   const atRiskCount = satellites.filter((s) => s.risk_tier === 'High' || s.risk_tier === 'Medium').length;
 
@@ -278,6 +409,8 @@ export function DashboardClient() {
           links={links}
           orbitPath={orbitPath}
           relatedOrbits={relatedOrbits}
+          avoidanceCurrentPath={avoidanceCurrentPath}
+          avoidanceDeviatedPath={avoidanceDeviatedPath}
           selectedId={selectedId}
           onSelect={setSelectedId}
           showAtRiskOnly={showAtRiskOnly}
@@ -559,6 +692,77 @@ export function DashboardClient() {
               {selectedSat.risk_tier}
             </span>
           ) : null}
+          <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+            <button
+              onClick={startOptimization}
+              disabled={planLoading || plan?.status === 'running'}
+              style={{ width: '100%' }}
+            >
+              {planLoading || plan?.status === 'running' ? 'Computing plan…' : 'Optimize Avoidance'}
+            </button>
+            {(plan?.status === 'pending' || plan?.status === 'running') ? (
+              <div style={{ display: 'grid', gap: 4 }}>
+                <div className="hud-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{plan.progress_message || 'Optimization in progress'}</span>
+                  <span>
+                    {typeof plan.optimization_elapsed_s === 'number' ? `${plan.optimization_elapsed_s.toFixed(1)}s` : '...'}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    width: '100%',
+                    height: 6,
+                    borderRadius: 99,
+                    background: 'rgba(255,255,255,0.12)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${planProgressPct ?? 100}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #4fc3f7, #66bb6a)',
+                      opacity: planProgressPct == null ? 0.45 : 0.9,
+                      transition: 'width 300ms ease',
+                    }}
+                  />
+                </div>
+                <div className="hud-label">
+                  {plan.progress_stage ? `Stage: ${plan.progress_stage}` : 'Stage: running'}
+                  {(plan.progress_done != null && plan.progress_total != null && plan.progress_total > 0)
+                    ? ` (${plan.progress_done}/${plan.progress_total})`
+                    : ''}
+                </div>
+              </div>
+            ) : null}
+            {plan?.status === 'completed' ? (
+              <div style={{ display: 'grid', gap: 4 }}>
+                <div className="hud-label">
+                  Plan ready: {plan.pre_miss_distance_km?.toFixed(2) ?? '?'} → {plan.post_miss_distance_km?.toFixed(2) ?? '?'} km
+                </div>
+                {maneuverInstruction ? (
+                  <div className="hud-label" style={{ color: '#b8e9ff' }}>
+                    Instruction: {maneuverInstruction}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {plan?.status === 'failed' ? (
+              <div className="hud-label" style={{ color: '#ffb36d' }}>
+                Optimization failed: {plan.error_message || 'unknown error'}
+              </div>
+            ) : null}
+            {plan?.status === 'cancelled' ? (
+              <div className="hud-label" style={{ color: '#ffb36d' }}>
+                Optimization cancelled
+              </div>
+            ) : null}
+            {planError ? (
+              <div className="hud-label" style={{ color: '#ffb36d' }}>
+                {planError}
+              </div>
+            ) : null}
+          </div>
         </div>
       )}
 
@@ -665,7 +869,23 @@ export function DashboardClient() {
                 <tbody>
                   {events.map((ev) => (
                     <tr key={ev.id}>
-                      <td><Link href={`/conjunctions/${ev.id}`}>#{ev.id}</Link></td>
+                      <td>
+                        <button
+                          onClick={() => openConjunctionDetail(ev.id)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#6fb3ff',
+                            cursor: 'pointer',
+                            padding: 0,
+                            boxShadow: 'none',
+                            textDecoration: 'underline',
+                            fontSize: '0.82rem',
+                          }}
+                        >
+                          #{ev.id}
+                        </button>
+                      </td>
                       <td>
                         {getOtherName(ev)}
                       </td>
@@ -697,6 +917,44 @@ export function DashboardClient() {
           ) : (
             <div className="hud-label" style={{ textAlign: 'center', marginTop: 40, marginBottom: 40 }}>
               SELECT A SATELLITE ON THE GLOBE
+            </div>
+          )}
+        </DraggableWindow>
+      )}
+
+      {/* ── Floating: Conjunction Detail ─────────────────────── */} 
+      {showConjDetailFloat && (
+        <DraggableWindow
+          title={selectedEventDetail ? `Conjunction #${selectedEventDetail.id}` : 'Conjunction Detail'}
+          onClose={() => setShowConjDetailFloat(false)}
+          width={920}
+          initialX={180}
+          initialY={70}
+        >
+          {eventDetailLoading ? (
+            <div className="hud-label" style={{ textAlign: 'center', padding: '2rem 0' }}>
+              Loading conjunction detail...
+            </div>
+          ) : eventDetailError ? (
+            <div className="hud-label" style={{ color: '#ffb36d' }}>
+              {eventDetailError}
+            </div>
+          ) : selectedEventDetail ? (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div className="panel" style={{ margin: 0 }}>
+                <h3 style={{ marginTop: 0, marginBottom: 8 }}>Conjunction Event #{selectedEventDetail.id}</h3>
+                <p style={{ margin: 0 }}>
+                  Defended {selectedEventDetail.defended_name || `NORAD ${selectedEventDetail.defended_norad_id}`} vs Intruder {selectedEventDetail.intruder_name || `NORAD ${selectedEventDetail.intruder_norad_id}`} | Miss Distance {selectedEventDetail.miss_distance_km.toFixed(3)} km
+                </p>
+                {typeof selectedEventDetail.pc_foster === 'number' ? (
+                  <p style={{ margin: '6px 0 0' }}>Collision Probability (Pc): {selectedEventDetail.pc_foster.toExponential(2)}</p>
+                ) : null}
+              </div>
+              <EventReplayClient key={selectedEventDetail.id} initialEvent={selectedEventDetail} />
+            </div>
+          ) : (
+            <div className="hud-label" style={{ textAlign: 'center', padding: '2rem 0' }}>
+              Select an event from the conjunction list.
             </div>
           )}
         </DraggableWindow>
