@@ -154,14 +154,24 @@ export function DashboardClient() {
     return ev.intruder_name || nameById.get(ev.intruder_norad_id) || `NORAD ${ev.intruder_norad_id}`;
   };
 
-  const topRiskEvent = useMemo(() => {
-    if (events.length === 0) return null;
-    return [...events].sort((a, b) => {
+  const topRiskLink = useMemo(() => {
+    if (selectedId === null) return null;
+    const matches = links.filter(
+      (link) =>
+        link.defended_norad_id === selectedId || link.intruder_norad_id === selectedId
+    );
+    if (matches.length === 0) return null;
+    return [...matches].sort((a, b) => {
       const tierDelta = (tierRank.get(b.risk_tier) || 0) - (tierRank.get(a.risk_tier) || 0);
       if (tierDelta !== 0) return tierDelta;
       return a.miss_distance_km - b.miss_distance_km;
     })[0];
-  }, [events, tierRank]);
+  }, [links, selectedId, tierRank]);
+
+  const getOtherNameFromLink = (link: ConjunctionLink) => {
+    const otherId = link.defended_norad_id === selectedId ? link.intruder_norad_id : link.defended_norad_id;
+    return nameById.get(otherId) || `NORAD ${otherId}`;
+  };
 
   useEffect(() => {
     async function load() {
@@ -631,13 +641,13 @@ export function DashboardClient() {
                       {selectedSat.risk_tier}
                     </span>
                   ) : null}
+                  {topRiskLink ? (
+                    <div className="hud-label" style={{ marginTop: 6 }}>
+                      Potential collision with {getOtherNameFromLink(topRiskLink)}
+                    </div>
+                  ) : null}
                 </div>
                 <span className="hud-label">NORAD {selectedSat.norad_id}</span>
-                {topRiskEvent ? (
-                  <div className="hud-label" style={{ marginTop: 6 }}>
-                    Potential collision with {getOtherName(topRiskEvent)} · {topRiskEvent.risk_tier} · {topRiskEvent.miss_distance_km.toFixed(2)} km · {new Date(topRiskEvent.tca_utc).toISOString().slice(0, 16).replace('T', ' ')} UTC
-                  </div>
-                ) : null}
               </div>
 
               {/* Conjunctions table */}
