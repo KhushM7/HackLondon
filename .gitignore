@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.db
+
 .venv/
 node_modules/
 .next/
