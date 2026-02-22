@@ -1,0 +1,221 @@
+/*!*************************************************************************************************************************************************************************************************************************************************************!*\
+  !*** css ./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[2]!./node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[3]!./app/globals.css ***!
+  \*************************************************************************************************************************************************************************************************************************************************************/
+:root {
+  --bg: #000;
+  --bg-panel: rgba(4, 10, 22, 0.88);
+  --border: rgba(0, 200, 255, 0.14);
+  --border-bright: rgba(0, 200, 255, 0.32);
+  --ink: #d8eaf8;
+  --ink-muted: #4e6a85;
+  --accent: #00d4ff;
+  --accent-dim: rgba(0, 212, 255, 0.12);
+  --accent-glow: 0 0 18px rgba(0, 212, 255, 0.22);
+  --warn: #ff9f43;
+  --high: #ff4454;
+  --medium: #ffd32a;
+  --low: #2ed573;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #000;
+  color: var(--ink);
+  font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.shell {
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+/* Dark glassmorphism card — used on asset/conjunction pages */
+.panel {
+  background: var(--bg-panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+}
+
+/* Standalone glass card for HUD overlays */
+.glass {
+  background: var(--bg-panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.grid {
+  display: grid;
+  grid-gap: 1rem;
+  gap: 1rem;
+}
+
+@media (min-width: 960px) {
+  .grid-2 {
+    grid-template-columns: 1.2fr 1fr;
+  }
+}
+
+/* ─── Tables ─────────────────────────────────────────────── */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border-bright);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+td {
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+/* ─── Links ───────────────────────────────────────────────── */
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ─── Badges ──────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.badge.high {
+  background: rgba(255, 68, 84, 0.15);
+  color: var(--high);
+  border: 1px solid rgba(255, 68, 84, 0.3);
+}
+
+.badge.medium {
+  background: rgba(255, 211, 42, 0.12);
+  color: var(--medium);
+  border: 1px solid rgba(255, 211, 42, 0.28);
+}
+
+.badge.low {
+  background: rgba(46, 213, 115, 0.12);
+  color: var(--low);
+  border: 1px solid rgba(46, 213, 115, 0.28);
+}
+
+/* ─── Buttons ─────────────────────────────────────────────── */
+
+button {
+  background: rgba(0, 212, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s;
+}
+
+button:hover {
+  background: rgba(0, 212, 255, 0.12);
+  border-color: var(--border-bright);
+  color: var(--accent);
+  box-shadow: var(--accent-glow);
+}
+
+/* Accent CTA — the "+ ADD SATELLITE" button */
+.btn-accent {
+  background: rgba(0, 212, 255, 0.14);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--accent-glow);
+}
+
+.btn-accent:hover {
+  background: rgba(0, 212, 255, 0.24);
+  box-shadow: 0 0 28px rgba(0, 212, 255, 0.38);
+  color: #fff;
+}
+
+/* Active filter state */
+.btn-active {
+  background: rgba(0, 212, 255, 0.16);
+  border-color: var(--border-bright);
+  color: var(--accent);
+}
+
+/* ─── Form inputs ─────────────────────────────────────────── */
+
+input,
+select,
+textarea {
+  background: rgba(4, 10, 22, 0.8);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--border-bright);
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.1);
+}
+
+/* ─── Utility classes ─────────────────────────────────────── */
+
+.hud-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.disclaimer {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+}
+
