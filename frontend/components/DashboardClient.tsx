@@ -142,6 +142,26 @@ export function DashboardClient() {
   const refreshTimerRef = useRef<number | null>(null);
 
   const nameById = useMemo(() => new Map(satellites.map((s) => [s.norad_id, s.name])), [satellites]);
+  const tierRank = useMemo(() => new Map([['High', 3], ['Medium', 2], ['Low', 1]]), []);
+
+  const getOtherName = (ev: Conjunction) => {
+    if (selectedId === ev.defended_norad_id) {
+      return ev.intruder_name || nameById.get(ev.intruder_norad_id) || `NORAD ${ev.intruder_norad_id}`;
+    }
+    if (selectedId === ev.intruder_norad_id) {
+      return ev.defended_name || nameById.get(ev.defended_norad_id) || `NORAD ${ev.defended_norad_id}`;
+    }
+    return ev.intruder_name || nameById.get(ev.intruder_norad_id) || `NORAD ${ev.intruder_norad_id}`;
+  };
+
+  const topRiskEvent = useMemo(() => {
+    if (events.length === 0) return null;
+    return [...events].sort((a, b) => {
+      const tierDelta = (tierRank.get(b.risk_tier) || 0) - (tierRank.get(a.risk_tier) || 0);
+      if (tierDelta !== 0) return tierDelta;
+      return a.miss_distance_km - b.miss_distance_km;
+    })[0];
+  }, [events, tierRank]);
 
   useEffect(() => {
     async function load() {
@@ -613,6 +633,11 @@ export function DashboardClient() {
                   ) : null}
                 </div>
                 <span className="hud-label">NORAD {selectedSat.norad_id}</span>
+                {topRiskEvent ? (
+                  <div className="hud-label" style={{ marginTop: 6 }}>
+                    Potential collision with {getOtherName(topRiskEvent)} · {topRiskEvent.risk_tier} · {topRiskEvent.miss_distance_km.toFixed(2)} km · {new Date(topRiskEvent.tca_utc).toISOString().slice(0, 16).replace('T', ' ')} UTC
+                  </div>
+                ) : null}
               </div>
 
               {/* Conjunctions table */}
@@ -632,7 +657,7 @@ export function DashboardClient() {
                     <tr key={ev.id}>
                       <td><Link href={`/conjunctions/${ev.id}`}>#{ev.id}</Link></td>
                       <td>
-                        {ev.intruder_name || nameById.get(ev.intruder_norad_id) || `NORAD ${ev.intruder_norad_id}`}
+                        {getOtherName(ev)}
                       </td>
                       <td>{new Date(ev.tca_utc).toISOString().slice(0, 16).replace('T', ' ')}</td>
                       <td>{ev.miss_distance_km.toFixed(2)}</td>
