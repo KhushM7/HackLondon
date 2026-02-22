@@ -35,6 +35,22 @@ class TLERecord(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)
 
 
+class CustomSatelliteRegistry(Base):
+    __tablename__ = "custom_satellite_registry"
+    __table_args__ = (
+        UniqueConstraint("norad_id", name="uq_custom_sat_registry_norad"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    norad_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(256))
+    status: Mapped[str] = mapped_column(String(24), default="stored", index=True)
+    conjunctions_found: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class ConjunctionEvent(Base):
     __tablename__ = "conjunction_events"
 

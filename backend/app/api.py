@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import logging
 from threading import Lock
 from time import perf_counter
+from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import or_, select
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_session
-from .models import AvoidancePlan, ConjunctionEvent, TLERecord
+from .models import AvoidancePlan, ConjunctionEvent, CustomSatelliteRegistry, TLERecord
 from .schemas import (
     AddSatelliteRequest,
     AvoidancePlanSummary,
@@ -21,10 +22,11 @@ from .schemas import (
     ConjunctionLink,
     ConjunctionDetail,
     ConjunctionResponse,
-    ConjunctionSummary,
     CongestionBand,
     CongestionResponse,
     CustomSatelliteItem,
+    CustomSatelliteAddQueued,
+    CustomSatelliteAddStatus,
     CustomSatelliteListItem,
     CustomSatelliteRequest,
     CustomSatelliteResponse,
@@ -46,6 +48,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 _screening_locks_guard = Lock()
 _screening_locks: dict[tuple[int, int], Lock] = {}
+_custom_add_jobs_guard = Lock()
+_custom_add_jobs: dict[str, dict] = {}
 
 
 def _get_screening_lock(norad_id: int, days: int) -> Lock:
@@ -56,6 +60,41 @@ def _get_screening_lock(norad_id: int, days: int) -> Lock:
             lock = Lock()
             _screening_locks[key] = lock
         return lock
+
+
+def _set_custom_add_job(job_id: str, **changes) -> None:
+    with _custom_add_jobs_guard:
+        job = _custom_add_jobs.get(job_id)
+        if job is None:
+            return
+        job.update(changes)
+        job["updated_at"] = datetime.utcnow()
+
+
+def _create_custom_add_job() -> str:
+    job_id = uuid4().hex
+    with _custom_add_jobs_guard:
+        _custom_add_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "stage": "queued",
+            "progress_pct": 0,
+            "message": "Queued",
+            "satellite": None,
+            "conjunctions_found": None,
+            "error": None,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+    return job_id
+
+
+def _get_custom_add_job(job_id: str) -> dict | None:
+    with _custom_add_jobs_guard:
+        job = _custom_add_jobs.get(job_id)
+        if job is None:
+            return None
+        return dict(job)
 
 
 def _name_map_for_events(db: Session, events: list[ConjunctionEvent]) -> dict[int, str]:
@@ -145,8 +184,139 @@ def _component_priority(links: list[ConjunctionEvent]) -> tuple[int, float]:
     return (max_risk, -min_miss)
 
 
+def _custom_satellite_item_from_record(record: TLERecord) -> CustomSatelliteItem:
+    return CustomSatelliteItem(
+        norad_id=record.norad_id,
+        name=record.name,
+        inclination_deg=record.inclination_deg,
+        mean_motion=record.mean_motion,
+        eccentricity=record.eccentricity,
+        raan_deg=record.raan_deg,
+        arg_perigee_deg=record.arg_perigee_deg,
+        bstar=record.bstar,
+        epoch=record.epoch,
+        source=record.source,
+        is_synthetic=record.is_synthetic,
+        mass_kg=record.mass_kg,
+        drag_area_m2=record.drag_area_m2,
+        radar_cross_section_m2=record.radar_cross_section_m2,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _upsert_custom_satellite_registry(
+    db: Session,
+    record: TLERecord,
+    *,
+    status: str,
+    conjunctions_found: int | None = None,
+    last_error: str | None = None,
+) -> None:
+    row = db.execute(
+        select(CustomSatelliteRegistry).where(CustomSatelliteRegistry.norad_id == record.norad_id)
+    ).scalar_one_or_none()
+    now = datetime.utcnow()
+    if row is None:
+        row = CustomSatelliteRegistry(
+            norad_id=record.norad_id,
+            name=record.name,
+            status=status,
+            conjunctions_found=conjunctions_found,
+            last_error=last_error,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+    else:
+        row.name = record.name
+        row.status = status
+        row.conjunctions_found = conjunctions_found
+        row.last_error = last_error
+        row.updated_at = now
+    db.commit()
+
+
+def _set_custom_satellite_registry_status(
+    db: Session,
+    norad_id: int,
+    *,
+    status: str,
+    conjunctions_found: int | None = None,
+    last_error: str | None = None,
+) -> None:
+    row = db.execute(
+        select(CustomSatelliteRegistry).where(CustomSatelliteRegistry.norad_id == norad_id)
+    ).scalar_one_or_none()
+    if row is None:
+        return
+    row.status = status
+    row.conjunctions_found = conjunctions_found
+    row.last_error = last_error
+    row.updated_at = datetime.utcnow()
+    db.commit()
+
+
+def _create_custom_satellite_record(db: Session, payload: CustomSatelliteRequest) -> TLERecord:
+    from sqlalchemy import func
+
+    line1 = payload.tle_line1.strip()
+    line2 = payload.tle_line2.strip()
+    sat_name = payload.name.strip()
+
+    existing_name = db.execute(
+        select(TLERecord).where(func.lower(TLERecord.name) == sat_name.lower())
+    ).scalar_one_or_none()
+    if existing_name is not None:
+        raise HTTPException(status_code=409, detail=f"Satellite with name '{sat_name}' already exists")
+
+    validation = validate_tle(line1, line2)
+    if not validation.valid:
+        raise HTTPException(status_code=422, detail={"tle_errors": validation.errors})
+
+    max_id = db.execute(
+        select(func.max(TLERecord.norad_id)).where(TLERecord.norad_id >= 90000, TLERecord.norad_id <= 99999)
+    ).scalar()
+    new_norad_id = (max_id + 1) if max_id is not None else 90000
+    if new_norad_id > 99999:
+        raise HTTPException(status_code=507, detail="Synthetic NORAD ID space exhausted (90000-99999)")
+
+    now = datetime.utcnow()
+    record = TLERecord(
+        norad_id=new_norad_id,
+        name=sat_name,
+        line1=validation.line1,
+        line2=validation.line2,
+        inclination_deg=validation.inclination_deg,
+        mean_motion=validation.mean_motion,
+        eccentricity=validation.eccentricity,
+        raan_deg=validation.raan_deg,
+        arg_perigee_deg=validation.arg_perigee_deg,
+        bstar=validation.bstar,
+        epoch=validation.epoch,
+        source="custom",
+        is_synthetic=True,
+        mass_kg=payload.mass_kg,
+        drag_area_m2=payload.drag_area_m2,
+        radar_cross_section_m2=payload.radar_cross_section_m2,
+        created_at=now,
+        updated_at=now,
+    )
+    try:
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+    except Exception as exc:
+        db.rollback()
+        if "UNIQUE" in str(exc).upper():
+            raise HTTPException(status_code=409, detail=f"Satellite with name '{sat_name}' already exists")
+        raise HTTPException(status_code=500, detail="Database error while storing satellite")
+    _upsert_custom_satellite_registry(db, record, status="stored", conjunctions_found=None, last_error=None)
+    return record
+
+
 def _select_satellite_ids_with_pairs(
-    db: Session, limit: int
+    db: Session, limit: int, include_norad_id: int | None = None
 ) -> tuple[list[int], list[ConjunctionEvent]]:
     events = db.execute(select(ConjunctionEvent)).scalars().all()
     if not events:
@@ -218,6 +388,18 @@ def _select_satellite_ids_with_pairs(
         for norad_id in remaining:
             selected_set.add(norad_id)
             selected.append(norad_id)
+
+    # Ensure a requested NORAD ID is present (e.g., a newly added custom satellite).
+    if include_norad_id is not None and include_norad_id not in selected_set:
+        exists = db.execute(
+            select(TLERecord.norad_id).where(TLERecord.norad_id == include_norad_id)
+        ).scalar_one_or_none()
+        if exists is not None:
+            if len(selected) >= limit and selected:
+                dropped = selected.pop()
+                selected_set.discard(dropped)
+            selected.append(include_norad_id)
+            selected_set.add(include_norad_id)
 
     # Only keep events whose endpoints are both selected
     selected_events = [
@@ -419,6 +601,65 @@ def _run_avoidance_optimization(
         db.close()
 
 
+def _run_custom_satellite_screening(norad_id: int, days: int) -> None:
+    """Background task: screen conjunctions for a newly added custom satellite."""
+    from .db import SessionLocal
+
+    db = SessionLocal()
+    lock = _get_screening_lock(norad_id, days)
+    acquired = lock.acquire(blocking=False)
+    started = perf_counter()
+    try:
+        if not acquired:
+            logger.info(
+                "Custom screening skipped: norad_id=%s days=%s reason=in_flight",
+                norad_id,
+                days,
+            )
+            return
+
+        logger.info("Custom screening started: norad_id=%s days=%s", norad_id, days)
+        _set_custom_satellite_registry_status(
+            db,
+            norad_id,
+            status="screening",
+            conjunctions_found=None,
+            last_error=None,
+        )
+        engine = ScreeningEngine(
+            db,
+            PropagateEngine(days, settings.propagation_resolution_seconds),
+        )
+        events = engine.find_conjunctions(norad_id, days=days)
+        _set_custom_satellite_registry_status(
+            db,
+            norad_id,
+            status="completed",
+            conjunctions_found=len(events),
+            last_error=None,
+        )
+        logger.info(
+            "Custom screening finished: norad_id=%s days=%s events=%s elapsed_s=%.1f",
+            norad_id,
+            days,
+            len(events),
+            perf_counter() - started,
+        )
+    except Exception:
+        _set_custom_satellite_registry_status(
+            db,
+            norad_id,
+            status="failed",
+            conjunctions_found=None,
+            last_error="screening_failed",
+        )
+        logger.exception("Custom screening failed: norad_id=%s days=%s", norad_id, days)
+    finally:
+        if acquired:
+            lock.release()
+        db.close()
+
+
 @router.post("/assets/{norad_id}/avoidance/optimize", response_model=AvoidancePlanSummary, status_code=202)
 def start_avoidance_optimization(
     norad_id: int,
@@ -552,6 +793,12 @@ def cancel_all_avoidance_plans(db: Session = Depends(get_session)):
 
 @router.post("/catalog/satellite", response_model=CatalogItem, status_code=201)
 async def add_satellite(payload: AddSatelliteRequest, db: Session = Depends(get_session)):
+    existing = db.execute(
+        select(TLERecord).where(TLERecord.norad_id == payload.norad_id)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
     service = IngestService(db)
     try:
         record = await service.ingest_satellite_by_norad_id(payload.norad_id)
@@ -597,124 +844,200 @@ def list_custom_satellites(db: Session = Depends(get_session)):
     return result
 
 
+def _run_custom_satellite_add_job(job_id: str, payload_data: dict) -> None:
+    from .db import SessionLocal
+
+    db = SessionLocal()
+    record: TLERecord | None = None
+    try:
+        _set_custom_add_job(
+            job_id,
+            status="running",
+            stage="validating",
+            progress_pct=8,
+            message="Validating TLE",
+        )
+        payload = CustomSatelliteRequest(**payload_data)
+
+        _set_custom_add_job(
+            job_id,
+            stage="storing",
+            progress_pct=22,
+            message="Saving satellite",
+        )
+        record = _create_custom_satellite_record(db, payload)
+
+        screen_days = max(1, min(settings.propagation_horizon_days, settings.custom_satellite_screen_days))
+        _set_custom_satellite_registry_status(
+            db,
+            record.norad_id,
+            status="screening",
+            conjunctions_found=None,
+            last_error=None,
+        )
+        _set_custom_add_job(
+            job_id,
+            stage="screening",
+            progress_pct=35,
+            message="Running conjunction screening",
+        )
+
+        def _progress(processed: int, total: int, hits: int) -> None:
+            if total <= 0:
+                pct = 95
+                msg = "Screening complete"
+            else:
+                frac = max(0.0, min(1.0, processed / total))
+                pct = min(95, 35 + int(frac * 60))
+                msg = f"Screening {processed}/{total} candidates, {hits} hits"
+            _set_custom_add_job(
+                job_id,
+                stage="screening",
+                progress_pct=pct,
+                message=msg,
+            )
+
+        lock = _get_screening_lock(record.norad_id, screen_days)
+        lock.acquire()
+        try:
+            engine = ScreeningEngine(
+                db,
+                PropagateEngine(screen_days, settings.propagation_resolution_seconds),
+            )
+            events = engine.find_conjunctions(
+                record.norad_id,
+                days=screen_days,
+                progress_callback=_progress,
+            )
+        finally:
+            lock.release()
+
+        sat_item = _custom_satellite_item_from_record(record)
+        _set_custom_satellite_registry_status(
+            db,
+            record.norad_id,
+            status="completed",
+            conjunctions_found=len(events),
+            last_error=None,
+        )
+        _set_custom_add_job(
+            job_id,
+            status="completed",
+            stage="completed",
+            progress_pct=100,
+            message="Satellite added successfully",
+            satellite=sat_item.model_dump(mode="json"),
+            conjunctions_found=len(events),
+            error=None,
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        if record is not None:
+            _set_custom_satellite_registry_status(
+                db,
+                record.norad_id,
+                status="failed",
+                conjunctions_found=None,
+                last_error=detail,
+            )
+        _set_custom_add_job(
+            job_id,
+            status="failed",
+            stage="failed",
+            progress_pct=100,
+            message="Add satellite failed",
+            error=detail,
+        )
+    except Exception as exc:
+        if record is not None:
+            _set_custom_satellite_registry_status(
+                db,
+                record.norad_id,
+                status="failed",
+                conjunctions_found=None,
+                last_error=str(exc),
+            )
+        _set_custom_add_job(
+            job_id,
+            status="failed",
+            stage="failed",
+            progress_pct=100,
+            message="Add satellite failed",
+            error=str(exc),
+        )
+        logger.exception("Custom satellite add job failed: job_id=%s", job_id)
+    finally:
+        db.close()
+
+
+@router.post("/catalog/custom-satellite/submit", response_model=CustomSatelliteAddQueued, status_code=202)
+def submit_custom_satellite(
+    payload: CustomSatelliteRequest,
+    background_tasks: BackgroundTasks,
+):
+    job_id = _create_custom_add_job()
+    background_tasks.add_task(
+        _run_custom_satellite_add_job,
+        job_id,
+        payload.model_dump(by_alias=True),
+    )
+    return CustomSatelliteAddQueued(
+        job_id=job_id,
+        status="queued",
+        stage="queued",
+        progress_pct=0,
+        message="Queued",
+    )
+
+
+@router.get("/catalog/custom-satellite/jobs/{job_id}", response_model=CustomSatelliteAddStatus)
+def custom_satellite_job_status(job_id: str):
+    job = _get_custom_add_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    satellite = None
+    if isinstance(job.get("satellite"), dict):
+        satellite = CustomSatelliteItem(**job["satellite"])
+    return CustomSatelliteAddStatus(
+        job_id=job["job_id"],
+        status=job["status"],
+        stage=job["stage"],
+        progress_pct=int(job["progress_pct"]),
+        message=job.get("message"),
+        satellite=satellite,
+        conjunctions_found=job.get("conjunctions_found"),
+        error=job.get("error"),
+    )
+
+
 @router.post("/catalog/custom-satellite", response_model=CustomSatelliteResponse, status_code=201)
-def add_custom_satellite(payload: CustomSatelliteRequest, db: Session = Depends(get_session)):
+def add_custom_satellite(
+    payload: CustomSatelliteRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_session),
+):
     """Add a fully synthetic satellite from user-provided TLE. No external API calls."""
     endpoint_started = perf_counter()
-    line1 = payload.tle_line1.strip()
-    line2 = payload.tle_line2.strip()
-    sat_name = payload.name.strip()
+    record = _create_custom_satellite_record(db, payload)
 
-    from sqlalchemy import func
-    # Check duplicate name first to fail fast.
-    existing_name = db.execute(
-        select(TLERecord).where(func.lower(TLERecord.name) == sat_name.lower())
-    ).scalar_one_or_none()
-    if existing_name is not None:
-        raise HTTPException(status_code=409, detail=f"Satellite with name '{sat_name}' already exists")
-
-    # Validate TLE (checksums auto-corrected for hand-crafted TLEs)
-    result = validate_tle(line1, line2)
-    if not result.valid:
-        raise HTTPException(status_code=422, detail={"tle_errors": result.errors})
-
-    # Use checksum-corrected lines
-    line1 = result.line1
-    line2 = result.line2
-
-    # Generate synthetic NORAD ID in 90000-99999 range
-    max_id = db.execute(
-        select(func.max(TLERecord.norad_id)).where(TLERecord.norad_id >= 90000, TLERecord.norad_id <= 99999)
-    ).scalar()
-    new_norad_id = (max_id + 1) if max_id is not None else 90000
-    if new_norad_id > 99999:
-        raise HTTPException(status_code=507, detail="Synthetic NORAD ID space exhausted (90000-99999)")
-
-    now = datetime.utcnow()
-    record = TLERecord(
-        norad_id=new_norad_id,
-        name=sat_name,
-        line1=line1,
-        line2=line2,
-        inclination_deg=result.inclination_deg,
-        mean_motion=result.mean_motion,
-        eccentricity=result.eccentricity,
-        raan_deg=result.raan_deg,
-        arg_perigee_deg=result.arg_perigee_deg,
-        bstar=result.bstar,
-        epoch=result.epoch,
-        source="custom",
-        is_synthetic=True,
-        mass_kg=payload.mass_kg,
-        drag_area_m2=payload.drag_area_m2,
-        radar_cross_section_m2=payload.radar_cross_section_m2,
-        created_at=now,
-        updated_at=now,
-    )
-
-    try:
-        db.add(record)
-        db.commit()
-        db.refresh(record)
-    except Exception as exc:
-        db.rollback()
-        if "UNIQUE" in str(exc).upper():
-            raise HTTPException(status_code=409, detail=f"Satellite with name '{sat_name}' already exists")
-        raise HTTPException(status_code=500, detail="Database error while storing satellite")
-
-    logger.info("API /catalog/custom-satellite started: name=%s", sat_name)
-    screening_started = perf_counter()
-    # Run conjunction screening
-    engine = ScreeningEngine(
-        db,
-        PropagateEngine(settings.propagation_horizon_days, settings.propagation_resolution_seconds),
-    )
-    conjunctions = engine.find_conjunctions(new_norad_id, days=settings.propagation_horizon_days)
+    screen_days = max(1, min(settings.propagation_horizon_days, settings.custom_satellite_screen_days))
+    background_tasks.add_task(_run_custom_satellite_screening, record.norad_id, screen_days)
     logger.info(
-        "API /catalog/custom-satellite screening finished: norad_id=%s events=%s elapsed_s=%.1f",
-        new_norad_id,
-        len(conjunctions),
-        perf_counter() - screening_started,
+        "API /catalog/custom-satellite queued screening: norad_id=%s days=%s",
+        record.norad_id,
+        screen_days,
     )
 
-    sat_item = CustomSatelliteItem(
-        norad_id=record.norad_id,
-        name=record.name,
-        inclination_deg=record.inclination_deg,
-        mean_motion=record.mean_motion,
-        eccentricity=record.eccentricity,
-        raan_deg=record.raan_deg,
-        arg_perigee_deg=record.arg_perigee_deg,
-        bstar=record.bstar,
-        epoch=record.epoch,
-        source=record.source,
-        is_synthetic=record.is_synthetic,
-        mass_kg=record.mass_kg,
-        drag_area_m2=record.drag_area_m2,
-        radar_cross_section_m2=record.radar_cross_section_m2,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
-    )
-
-    event_summaries = [
-        ConjunctionSummary(
-            id=e.id,
-            intruder_norad_id=e.intruder_norad_id,
-            tca_utc=e.tca_utc,
-            miss_distance_km=e.miss_distance_km,
-            risk_tier=e.risk_tier,
-        )
-        for e in conjunctions
-    ]
+    sat_item = _custom_satellite_item_from_record(record)
 
     response = CustomSatelliteResponse(
         satellite=sat_item,
-        conjunctions_found=len(conjunctions),
-        events=event_summaries,
+        conjunctions_found=0,
+        events=[],
     )
     logger.info(
         "API /catalog/custom-satellite finished: norad_id=%s total_elapsed_s=%.1f",
-        new_norad_id,
+        record.norad_id,
         perf_counter() - endpoint_started,
     )
     return response
@@ -742,19 +1065,30 @@ def delete_custom_satellite(norad_id: int, db: Session = Depends(get_session)):
             )
         )
     )
+    db.execute(
+        sa_delete(CustomSatelliteRegistry).where(CustomSatelliteRegistry.norad_id == norad_id)
+    )
     db.delete(record)
     db.commit()
     return {"detail": f"Satellite {norad_id} and associated conjunction events deleted"}
 
 
 @router.get("/catalog/positions", response_model=CatalogPositionsResponse)
-def catalog_positions(limit: int = Query(default=500, ge=1, le=5000), db: Session = Depends(get_session)):
+def catalog_positions(
+    limit: int = Query(default=500, ge=1, le=5000),
+    focus_norad_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_session),
+):
     from sgp4.api import Satrec, jday as sgp4_jday
 
     now = datetime.utcnow()
     jd, fr = sgp4_jday(now.year, now.month, now.day, now.hour, now.minute, now.second + now.microsecond / 1e6)
 
-    selected_ids, selected_events = _select_satellite_ids_with_pairs(db, limit)
+    selected_ids, selected_events = _select_satellite_ids_with_pairs(
+        db,
+        limit,
+        include_norad_id=focus_norad_id,
+    )
     if not selected_ids:
         return CatalogPositionsResponse(satellites=[], links=[])
 
@@ -810,7 +1144,11 @@ def congestion(db: Session = Depends(get_session)):
 
 
 @router.get("/catalog/orbit/{norad_id}", response_model=OrbitPathResponse)
-def catalog_orbit(norad_id: int, db: Session = Depends(get_session)):
+def catalog_orbit(
+    norad_id: int,
+    orbits: float = Query(default=1.0, ge=0.5, le=4.0),
+    db: Session = Depends(get_session),
+):
     from sgp4.api import Satrec, jday as sgp4_jday
 
     record = db.execute(select(TLERecord).where(TLERecord.norad_id == norad_id)).scalar_one_or_none()
@@ -820,13 +1158,14 @@ def catalog_orbit(norad_id: int, db: Session = Depends(get_session)):
     mean_motion = record.mean_motion or 0.0
     period_seconds = 86400.0 / mean_motion if mean_motion > 0 else 5400.0
     period_seconds = max(1800.0, min(period_seconds, 21600.0))
+    total_seconds = period_seconds * orbits
     step_seconds = 120.0
 
     now = datetime.utcnow()
     sat = Satrec.twoline2rv(record.line1, record.line2)
     positions: list[list[float]] = []
     t = 0.0
-    while t <= period_seconds:
+    while t <= total_seconds:
         dt = now + timedelta(seconds=t)
         jd, fr = sgp4_jday(
             dt.year,

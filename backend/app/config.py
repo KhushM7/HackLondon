@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     ingestion_interval_hours: int = 6
     propagation_horizon_days: int = 7
     propagation_resolution_seconds: int = 60
+    custom_satellite_screen_days: int = 3
     leo_max_altitude_km: float = 2000.0
 
     class Config:

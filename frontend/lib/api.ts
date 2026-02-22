@@ -142,13 +142,21 @@ export type OrbitPathResponse = {
   positions_km: [number, number, number][];
 };
 
-export async function getCatalogPositions(limit?: number): Promise<CatalogPositionsResponse> {
-  const qs = typeof limit === 'number' ? `?limit=${limit}` : '';
+export async function getCatalogPositions(limit?: number, focusNoradId?: number): Promise<CatalogPositionsResponse> {
+  const params = new URLSearchParams();
+  if (typeof limit === 'number') {
+    params.set('limit', String(limit));
+  }
+  if (typeof focusNoradId === 'number') {
+    params.set('focus_norad_id', String(focusNoradId));
+  }
+  const qs = params.toString() ? `?${params.toString()}` : '';
   return requestJson<CatalogPositionsResponse>(`/catalog/positions${qs}`);
 }
 
-export async function getOrbitPath(noradId: number): Promise<OrbitPathResponse> {
-  return requestJson<OrbitPathResponse>(`/catalog/orbit/${noradId}`);
+export async function getOrbitPath(noradId: number, orbits?: number): Promise<OrbitPathResponse> {
+  const qs = typeof orbits === 'number' ? `?orbits=${orbits}` : '';
+  return requestJson<OrbitPathResponse>(`/catalog/orbit/${noradId}${qs}`);
 }
 
 export async function addSatellite(noradId: number): Promise<CatalogItem> {
@@ -171,28 +179,72 @@ export type CustomSatelliteResponse = {
   }[];
 };
 
+export type CustomSatelliteAddJob = {
+  job_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  stage: string;
+  progress_pct: number;
+  message?: string | null;
+  satellite?: CatalogItem | null;
+  conjunctions_found?: number | null;
+  error?: string | null;
+};
+
+export type CustomSatelliteAddProgress = {
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  stage: string;
+  progress_pct: number;
+  message?: string | null;
+};
+
 const customSatelliteInFlight = new Map<string, Promise<CatalogItem>>();
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export async function addCustomSatellite(payload: {
   name: string;
   line1: string;
   line2: string;
-}): Promise<CatalogItem> {
+}, onProgress?: (progress: CustomSatelliteAddProgress) => void): Promise<CatalogItem> {
   const key = `${payload.name.trim().toLowerCase()}|${payload.line1.trim()}|${payload.line2.trim()}`;
   const existing = customSatelliteInFlight.get(key);
   if (existing) {
     return existing;
   }
 
-  const request = requestJson<CustomSatelliteResponse>('/catalog/custom-satellite', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-    .then((resp) => resp.satellite)
-    .finally(() => {
-      customSatelliteInFlight.delete(key);
+  const request = (async () => {
+    let state = await requestJson<CustomSatelliteAddJob>('/catalog/custom-satellite/submit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
     });
+    onProgress?.({
+      status: state.status,
+      stage: state.stage,
+      progress_pct: state.progress_pct,
+      message: state.message,
+    });
+
+    while (state.status === 'queued' || state.status === 'running') {
+      await sleep(650);
+      state = await requestJson<CustomSatelliteAddJob>(`/catalog/custom-satellite/jobs/${state.job_id}`);
+      onProgress?.({
+        status: state.status,
+        stage: state.stage,
+        progress_pct: state.progress_pct,
+        message: state.message,
+      });
+    }
+
+    if (state.status !== 'completed' || !state.satellite) {
+      throw new Error(state.error || 'Failed to add custom satellite');
+    }
+    return state.satellite;
+  })().finally(() => {
+    customSatelliteInFlight.delete(key);
+  });
 
   customSatelliteInFlight.set(key, request);
   return request;

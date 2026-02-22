@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { addCustomSatellite, addSatellite, CatalogItem } from '../lib/api';
+import { addCustomSatellite, addSatellite, CatalogItem, CustomSatelliteAddProgress } from '../lib/api';
 
 type Mode = 'norad' | 'custom';
 
@@ -21,9 +21,10 @@ export function AddSatelliteModal({
 
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
+  const [customProgress, setCustomProgress] = useState<CustomSatelliteAddProgress | null>(null);
 
   const submitLabel = useMemo(() => {
-    if (status === 'loading') return mode === 'norad' ? 'Fetching TLE...' : 'Saving...';
+    if (status === 'loading') return mode === 'norad' ? 'Fetching TLE...' : 'Adding Satellite...';
     if (status === 'success') return 'Done';
     return mode === 'norad' ? 'Add from NORAD' : 'Add Custom Satellite';
   }, [status, mode]);
@@ -32,6 +33,7 @@ export function AddSatelliteModal({
     e.preventDefault();
     setStatus('loading');
     setMessage('');
+    setCustomProgress(null);
 
     try {
       let sat: CatalogItem;
@@ -52,11 +54,24 @@ export function AddSatelliteModal({
           name: name.trim(),
           line1: line1.trim(),
           line2: line2.trim(),
+        }, (progress) => {
+          setCustomProgress(progress);
+          if (progress.message) {
+            setMessage(progress.message);
+          }
         });
       }
 
       setStatus('success');
-      setMessage(`Added: ${sat.name} (NORAD ${sat.norad_id})`);
+      if (mode === 'custom') {
+        setCustomProgress({
+          status: 'completed',
+          stage: 'completed',
+          progress_pct: 100,
+          message: 'Satellite added successfully',
+        });
+      }
+      setMessage(`Added: ${sat.name} (NORAD ${sat.norad_id}).`);
       setTimeout(() => {
         onAdded(sat);
         onClose();
@@ -95,6 +110,7 @@ export function AddSatelliteModal({
               setMode('norad');
               setStatus('idle');
               setMessage('');
+              setCustomProgress(null);
             }}
           >
             NORAD
@@ -106,6 +122,7 @@ export function AddSatelliteModal({
               setMode('custom');
               setStatus('idle');
               setMessage('');
+              setCustomProgress(null);
             }}
           >
             Custom TLE
@@ -170,6 +187,24 @@ export function AddSatelliteModal({
                 Use this to add synthetic satellites for local collision-testing without API lookup.
               </p>
             </>
+          )}
+
+          {mode === 'custom' && status === 'loading' && customProgress && (
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ width: '100%', height: 8, borderRadius: 99, background: 'rgba(255,255,255,0.14)', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    width: `${Math.max(3, Math.min(100, customProgress.progress_pct))}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #4fc3f7, #66bb6a)',
+                    transition: 'width 220ms ease',
+                  }}
+                />
+              </div>
+              <p className="disclaimer" style={{ margin: 0 }}>
+                {customProgress.progress_pct}% · {customProgress.stage}
+              </p>
+            </div>
           )}
 
           {message && (

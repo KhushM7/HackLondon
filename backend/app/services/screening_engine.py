@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 from time import perf_counter
+from typing import Callable
 from time import sleep
 
 import numpy as np
@@ -26,7 +27,12 @@ class ScreeningEngine:
         self.db = db
         self.propagate_engine = propagate_engine
 
-    def find_conjunctions(self, defended_norad_id: int, days: int = 3) -> list[ConjunctionEvent]:
+    def find_conjunctions(
+        self,
+        defended_norad_id: int,
+        days: int = 3,
+        progress_callback: Callable[[int, int, int], None] | None = None,
+    ) -> list[ConjunctionEvent]:
         started_at = perf_counter()
         logger.info(
             "Screening start: defended_norad_id=%s days=%s",
@@ -82,6 +88,8 @@ class ScreeningEngine:
             len(candidates),
             (perf_counter() - query_started) * 1000.0,
         )
+        if progress_callback is not None:
+            progress_callback(0, len(candidates), 0)
 
         propagate_started = perf_counter()
         start = datetime.utcnow()
@@ -95,7 +103,7 @@ class ScreeningEngine:
 
         created: list[ConjunctionEvent] = []
         cutoff = start + timedelta(days=days)
-        progress_stride = max(1, len(candidates) // 10)
+        progress_stride = max(1, len(candidates) // 50)
         for idx, candidate in enumerate(candidates, start=1):
             intr = self.propagate_engine.propagate(candidate.line1, candidate.line2, start=start)
             event = self._closest_approach(
@@ -114,6 +122,8 @@ class ScreeningEngine:
                     len(created),
                     perf_counter() - started_at,
                 )
+                if progress_callback is not None:
+                    progress_callback(idx, len(candidates), len(created))
 
         write_started = perf_counter()
         self._replace_events_for_asset(defended_norad_id, created)

@@ -1,22 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="fix conjunctions screen and improve algorithm time">
+    <list default="true" id="56541bfc-9b1f-4b2c-85e7-30ef8cc41bf2" name="Changes" comment="everything works now">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/.env.example" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/app/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/api.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/app/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/app/schemas.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/schemas.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/services/avoidance_simulator.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/avoidance_simulator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/services/covariance_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/covariance_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/services/ingest_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/ingest_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backend/app/services/maneuver_planner.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/maneuver_planner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/app/services/screening_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/app/services/screening_engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/orbitguard.db" beforeDir="false" afterPath="$PROJECT_DIR$/backend/orbitguard.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/app/assets/[noradId]/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/app/assets/[noradId]/page.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/app/conjunctions/[eventId]/page.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/components/AddSatelliteModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/components/AddSatelliteModal.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/components/DashboardClient.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/components/DashboardClient.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/frontend/components/EventReplayClient.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/components/EventReplayClient.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/components/GlobeView.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/components/GlobeView.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/lib/api.ts" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/lib/api.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/frontend/tsconfig.tsbuildinfo" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/tsconfig.tsbuildinfo" afterDir="false" />
@@ -57,6 +51,7 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.main.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
@@ -167,7 +162,15 @@
       <option name="project" value="LOCAL" />
       <updated>1771747510291</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="everything works now">
+      <option name="closed" value="true" />
+      <created>1771761572390</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1771761572390</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -182,7 +185,11 @@
     <MESSAGE value="Updated gitignnore and db" />
     <MESSAGE value="Frontend changes to custom satellite" />
     <MESSAGE value="fix conjunctions screen and improve algorithm time" />
-    <option name="LAST_COMMIT_MESSAGE" value="fix conjunctions screen and improve algorithm time" />
+    <MESSAGE value="everything works now" />
+    <option name="LAST_COMMIT_MESSAGE" value="everything works now" />
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/HackLondon$main.coverage" NAME="main Coverage Results" MODIFIED="1771761348865" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/backend/app" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

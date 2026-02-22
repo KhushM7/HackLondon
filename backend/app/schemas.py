@@ -195,6 +195,25 @@ class CustomSatelliteResponse(BaseModel):
     events: list[ConjunctionSummary]
 
 
+class CustomSatelliteAddQueued(BaseModel):
+    job_id: str
+    status: str
+    stage: str
+    progress_pct: int
+    message: str | None = None
+
+
+class CustomSatelliteAddStatus(BaseModel):
+    job_id: str
+    status: str
+    stage: str
+    progress_pct: int
+    message: str | None = None
+    satellite: CustomSatelliteItem | None = None
+    conjunctions_found: int | None = None
+    error: str | None = None
+
+
 class CustomSatelliteListItem(BaseModel):
     norad_id: int
     name: str

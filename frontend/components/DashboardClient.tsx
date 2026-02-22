@@ -255,7 +255,7 @@ export function DashboardClient() {
         .filter((id) => id !== selectedId);
       if (relatedIds.length > 0) {
         const uniqueIds = Array.from(new Set(relatedIds));
-        Promise.all(uniqueIds.map((id) => getOrbitPath(id)))
+        Promise.all(uniqueIds.map((id) => getOrbitPath(id, 2.5)))
           .then((items) => setRelatedOrbits(items))
           .catch(() => setRelatedOrbits([]));
       } else {
@@ -315,7 +315,7 @@ export function DashboardClient() {
 
   async function handleSatelliteAdded(sat: CatalogItem) {
     try {
-      const positions = await getCatalogPositions(500);
+      const positions = await getCatalogPositions(500, sat.norad_id);
       setSatellites(positions.satellites);
       setLinks(positions.links);
       setSelectedId(sat.norad_id);
@@ -495,23 +495,6 @@ export function DashboardClient() {
         >
           <span style={{ color: 'var(--accent)' }}>●</span>
           {loading ? '…' : satellites.length} TRACKED
-        </div>
-        <div
-          style={{
-            padding: '4px 10px',
-            borderRadius: 20,
-            fontSize: '0.7rem',
-            letterSpacing: '0.06em',
-            background: 'rgba(0,0,0,0.4)',
-            border: '1px solid var(--border)',
-            color: atRiskCount > 0 ? 'var(--high)' : 'var(--ink-muted)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-          }}
-        >
-          <span>⚠</span>
-          {loading ? '…' : atRiskCount} AT RISK
         </div>
 
         {/* Filter group */}

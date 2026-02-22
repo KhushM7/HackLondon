@@ -252,6 +252,40 @@ function OrbitLine({ points, color = '#7ad6ff', opacity = 0.7 }: { points: THREE
   );
 }
 
+function OrbitDashedLine({
+  points,
+  color = '#ffd56b',
+  opacity = 0.95,
+}: {
+  points: THREE.Vector3[];
+  color?: string;
+  opacity?: number;
+}) {
+  const dotPoints = useMemo(() => {
+    if (points.length < 2) return [] as THREE.Vector3[];
+    const targetDots = 80;
+    const stride = Math.max(1, Math.floor(points.length / targetDots));
+    const sampled: THREE.Vector3[] = [];
+    for (let i = 0; i < points.length; i += stride) {
+      sampled.push(points[i]);
+    }
+    return sampled;
+  }, [points]);
+
+  if (dotPoints.length === 0) return null;
+
+  return (
+    <group>
+      {dotPoints.map((p, idx) => (
+        <mesh key={`orbit-dot-${idx}`} position={[p.x, p.y, p.z]} frustumCulled={false}>
+          <sphereGeometry args={[0.0025, 5, 5]} />
+          <meshBasicMaterial color={color} transparent opacity={opacity} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function OrbitTubeLinear({
   points,
   color = '#7ad6ff',
@@ -440,6 +474,39 @@ function Scene({
     }));
   }, [relatedOrbits]);
 
+  const selectedLinks = useMemo(() => {
+    if (selectedId === null) return [];
+    return links.filter(
+      (link) =>
+        link.defended_norad_id === selectedId || link.intruder_norad_id === selectedId
+    );
+  }, [links, selectedId]);
+
+  const selectedSatellite = useMemo(() => {
+    if (selectedId === null) return null;
+    return satellites.find((s) => s.norad_id === selectedId) ?? null;
+  }, [satellites, selectedId]);
+
+  const shouldShowRelatedTracks = selectedSatellite?.risk_tier === 'High' || selectedSatellite?.risk_tier === 'Medium';
+
+  const relatedTrackColorById = useMemo(() => {
+    const map = new Map<number, string>();
+    if (selectedId === null) {
+      return map;
+    }
+    for (const link of selectedLinks) {
+      if (link.risk_tier !== 'High' && link.risk_tier !== 'Medium') {
+        continue;
+      }
+      const otherId = link.defended_norad_id === selectedId ? link.intruder_norad_id : link.defended_norad_id;
+      const current = map.get(otherId);
+      if (link.risk_tier === 'High' || !current) {
+        map.set(otherId, link.risk_tier === 'High' ? '#ff6b6b' : '#ffd56b');
+      }
+    }
+    return map;
+  }, [selectedId, selectedLinks]);
+
   const avoidanceCurrentPoints = useMemo(() => {
     return orderedAvoidancePoints(avoidanceCurrentPath);
   }, [avoidanceCurrentPath]);
@@ -463,14 +530,6 @@ function Scene({
     return { points: [] as THREE.Vector3[], color: '#7ad6ff', opacity: 0.7 };
   }, [selectedId, avoidanceDeviatedPoints, avoidanceCurrentPoints, orbitPoints]);
 
-  const selectedLinks = useMemo(() => {
-    if (selectedId === null) return [];
-    return links.filter(
-      (link) =>
-        link.defended_norad_id === selectedId || link.intruder_norad_id === selectedId
-    );
-  }, [links, selectedId]);
-
   const arrowIds = useMemo(() => {
     const ids = new Set<number>();
     if (selectedId !== null) {
@@ -482,25 +541,6 @@ function Scene({
     }
     return Array.from(ids);
   }, [selectedLinks, selectedId]);
-
-  const relatedArrows = useMemo(() => {
-    const arrows: { key: string; pos: THREE.Vector3; dir: THREE.Vector3 }[] = [];
-    for (const entry of relatedOrbitPoints) {
-      const pts = entry.points;
-      if (pts.length < 2) continue;
-      const indices = [Math.floor(pts.length * 0.33), Math.floor(pts.length * 0.66)];
-      for (const idx of indices) {
-        const i = Math.min(Math.max(idx, 0), pts.length - 2);
-        const dir = pts[i + 1].clone().sub(pts[i]).normalize();
-        arrows.push({
-          key: `related-arrow-${entry.norad_id}-${i}`,
-          pos: pts[i],
-          dir,
-        });
-      }
-    }
-    return arrows;
-  }, [relatedOrbitPoints]);
 
   return (
     <>
@@ -514,6 +554,14 @@ function Scene({
       {selectedId !== null && selectedTrack.points.length > 1 && (
         <OrbitTubeLinear points={selectedTrack.points} color={selectedTrack.color} opacity={selectedTrack.opacity} radius={0.008} />
       )}
+      {selectedId !== null && shouldShowRelatedTracks && relatedOrbitPoints.map((entry) => (
+        <OrbitDashedLine
+          key={`related-orbit-${entry.norad_id}`}
+          points={entry.points}
+          color={relatedTrackColorById.get(entry.norad_id) ?? '#ffd56b'}
+          opacity={0.95}
+        />
+      ))}
       {arrowIds.map((id) => {
         const pos = posById.get(id);
         const vel = velById.get(id);
