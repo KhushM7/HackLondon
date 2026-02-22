@@ -121,9 +121,15 @@ class ScreeningEngine:
         d_vel = d_vel[:cutoff_idx]
         i_vel = i_vel[:cutoff_idx]
 
-        distances = np.linalg.norm(d_pos - i_pos, axis=1)
-        min_idx = int(np.argmin(distances))
-        min_distance = float(distances[min_idx])
+        # GPU-accelerated distance computation when available
+        from .compute_backend import get_xp, asnumpy
+        xp = get_xp()
+        d_pos_xp = xp.asarray(d_pos)
+        i_pos_xp = xp.asarray(i_pos)
+        distances_xp = xp.linalg.norm(d_pos_xp - i_pos_xp, axis=1)
+        min_idx = int(xp.argmin(distances_xp))
+        min_distance = float(distances_xp[min_idx])
+        distances = asnumpy(distances_xp)
 
         if min_distance > 10.0:
             return None

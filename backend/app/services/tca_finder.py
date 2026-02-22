@@ -240,11 +240,19 @@ def find_tca_from_states(
     Returns:
         TCAResult or None.
     """
-    r_rel = positions_primary - positions_secondary
-    v_rel = velocities_primary - velocities_secondary
+    # GPU-accelerated vectorized distance and dot product computation
+    from .compute_backend import get_xp, asnumpy
+    xp = get_xp()
+    pos_p = xp.asarray(positions_primary)
+    pos_s = xp.asarray(positions_secondary)
+    vel_p = xp.asarray(velocities_primary)
+    vel_s = xp.asarray(velocities_secondary)
 
-    distances = np.linalg.norm(r_rel, axis=1)
-    dot_products = np.sum(r_rel * v_rel, axis=1)
+    r_rel = pos_p - pos_s
+    v_rel = vel_p - vel_s
+
+    distances = asnumpy(xp.linalg.norm(r_rel, axis=1))
+    dot_products = asnumpy(xp.sum(r_rel * v_rel, axis=1))
 
     min_idx = int(np.argmin(distances))
 

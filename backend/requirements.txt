@@ -10,3 +10,6 @@ numpy==2.2.3
 pytest==8.3.4
 astropy==6.1.7
 scipy==1.15.2
+
+# Optional: GPU acceleration (uncomment for CUDA 12.x)
+# cupy-cuda12x>=13.0.0

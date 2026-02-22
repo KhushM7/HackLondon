@@ -161,6 +161,10 @@ def compute_pc_monte_carlo(
     Samples positions from the combined covariance distribution and counts
     the fraction that fall within the HBR disk.
 
+    When GPU is enabled (ORBITGUARD_BACKEND=gpu), sampling and distance
+    computation run on the GPU via CuPy for significant speedup at large
+    sample counts.
+
     Parameters:
         miss_vector_bplane: [BdotT, BdotR] miss vector [km].
         cov_bplane_2x2: 2x2 combined covariance in B-plane [km^2].
@@ -171,18 +175,42 @@ def compute_pc_monte_carlo(
     Returns:
         PcResult with Monte Carlo Pc and 95% confidence interval.
     """
-    rng = np.random.default_rng(seed)
+    from .compute_backend import get_xp, asnumpy, is_gpu_enabled
+
+    xp = get_xp()
 
     try:
-        # Sample from bivariate normal centered at miss vector
-        samples = rng.multivariate_normal(miss_vector_bplane, cov_bplane_2x2, n_samples)
+        if is_gpu_enabled():
+            # GPU path: Cholesky decomposition + batch sampling on GPU
+            mu = xp.asarray(miss_vector_bplane, dtype=xp.float64)
+            cov = xp.asarray(cov_bplane_2x2, dtype=xp.float64)
+            L = xp.linalg.cholesky(cov)
+            rng = xp.random.default_rng(seed) if hasattr(xp.random, 'default_rng') else None
+            if rng is not None:
+                z = rng.standard_normal((n_samples, 2), dtype=xp.float64)
+            else:
+                if seed is not None:
+                    xp.random.seed(seed)
+                z = xp.random.standard_normal((n_samples, 2)).astype(xp.float64)
+            samples = z @ L.T + mu
+        else:
+            # CPU path: use NumPy's multivariate_normal directly
+            rng = np.random.default_rng(seed)
+            samples = rng.multivariate_normal(miss_vector_bplane, cov_bplane_2x2, n_samples)
+            samples = xp.asarray(samples)
     except np.linalg.LinAlgError:
         logger.error("Monte Carlo: covariance not valid for sampling")
         return PcResult(pc=float('nan'), method="monte_carlo")
+    except Exception as exc:
+        # CuPy may raise different exceptions for non-PD matrices
+        if "positive" in str(exc).lower() or "cholesky" in str(exc).lower():
+            logger.error("Monte Carlo: covariance not valid for sampling")
+            return PcResult(pc=float('nan'), method="monte_carlo")
+        raise
 
     # Count collisions (samples within HBR disk from origin)
-    distances = np.linalg.norm(samples, axis=1)
-    n_collisions = int(np.sum(distances < hard_body_radius_km))
+    distances = xp.linalg.norm(samples, axis=1)
+    n_collisions = int(xp.sum(distances < hard_body_radius_km))
 
     pc = n_collisions / n_samples
 
@@ -192,7 +220,7 @@ def compute_pc_monte_carlo(
     p_hat = pc
     denom = 1.0 + z ** 2 / n
     center = (p_hat + z ** 2 / (2 * n)) / denom
-    halfwidth = z * np.sqrt((p_hat * (1 - p_hat) + z ** 2 / (4 * n)) / n) / denom
+    halfwidth = z * float(np.sqrt((p_hat * (1 - p_hat) + z ** 2 / (4 * n)) / n)) / denom
 
     ci_low = max(0.0, center - halfwidth)
     ci_high = min(1.0, center + halfwidth)
