@@ -11,5 +11,8 @@ node_modules/
 .env.local
 .pytest_cache/
 
+prd.md
+progress.md
+
 backend/orbitguard.db-shm
 backend/orbitguard.db-wal
